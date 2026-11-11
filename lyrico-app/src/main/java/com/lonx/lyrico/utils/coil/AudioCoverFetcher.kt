@@ -23,15 +23,50 @@ class AudioCoverFetcher(
     private val request: CoverRequest,
     private val posterReader: ArtistPosterReader,
     private val options: Options,
-    private val remoteCopy: ((String) -> java.io.File?)? = null,
+    /** Lyrico Mod: read-only descriptor of a `remote://` song (local copy or partial-read proxy). */
+    private val remoteDescriptor: ((String) -> android.os.ParcelFileDescriptor?)? = null,
+    /** Lyrico Mod: disk cache of remote songs' embedded front covers (filled by the library scan). */
+    private val remoteCovers: com.lonx.lyrico.remote.integration.RemoteCoverCache? = null,
 ) : Fetcher {
 
     private fun openDescriptor(uri: android.net.Uri): android.os.ParcelFileDescriptor? {
-        if (uri.scheme == "remote") {
-            val file = remoteCopy?.invoke(uri.toString()) ?: return null
-            return android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
-        }
+        if (uri.scheme == "remote") return remoteDescriptor?.invoke(uri.toString())
         return contentResolver.openFileDescriptor(uri, "r")
+    }
+
+    /** A plain "front cover of this one remote song" request, which the remote cover cache can answer. */
+    private fun isCacheableRemoteCover(): Boolean =
+        remoteCovers != null && request.uri.scheme == "remote" && request.artistName == null &&
+            !request.skipEmbeddedPictures && request.pictureType == AudioPictureType.FrontCover &&
+            request.fallbackToAny && request.fallbackPictureTypes.isEmpty() &&
+            request.candidates.all { it.uri == request.uri }
+
+    private suspend fun fetchRemoteCover(): ByteArray? {
+        val cache = remoteCovers ?: return null
+        val uri = request.uri.toString()
+        when (val hit = cache.get(uri, request.fileSize, request.lastUpdate)) {
+            is com.lonx.lyrico.remote.integration.RemoteCoverCache.Lookup.Hit -> return hit.bytes
+            com.lonx.lyrico.remote.integration.RemoteCoverCache.Lookup.NoCover -> return null
+            com.lonx.lyrico.remote.integration.RemoteCoverCache.Lookup.Miss -> Unit
+        }
+        // Strict read: a network failure throws (and is not remembered as "no cover").
+        val bytes = try {
+            openDescriptor(request.uri)?.use { pfd ->
+                val data = AudioTagReader.read(
+                    pfd = pfd,
+                    readPictures = true,
+                    strict = true,
+                    audioPropertiesReadStyle = com.lonx.audiotag.model.AudioPropertiesReadStyle.Fast,
+                )
+                com.lonx.lyrico.remote.integration.RemoteCoverPick.frontCover(data.pictures) ?: ByteArray(0)
+            }
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            android.util.Log.w("AudioCoverFetcher", "Remote cover read failed: $uri", e)
+            null
+        } ?: return null
+        cache.put(uri, request.fileSize, request.lastUpdate, bytes)
+        return bytes.takeIf { it.isNotEmpty() }
     }
 
     override suspend fun fetch(): FetchResult? {
@@ -39,7 +74,9 @@ class AudioCoverFetcher(
             ?: listOf(CoverCandidate(request.uri, request.lastUpdate))
 
         val pictureBytes = withContext(Dispatchers.IO) {
-            if (request.artistName != null) {
+            if (isCacheableRemoteCover()) {
+                fetchRemoteCover()
+            } else if (request.artistName != null) {
                 posterReader.resolve(request)?.bytes
                     // Covers and other artists' images are display fallbacks, never edit targets.
                     ?: if (!request.skipEmbeddedPictures && request.fallbackToAny) {
@@ -107,7 +144,8 @@ class AudioCoverFetcher(
     class Factory(
         private val contentResolver: ContentResolver,
         private val posterReader: ArtistPosterReader,
-        private val remoteCopy: ((String) -> java.io.File?)? = null,
+        private val remoteDescriptor: ((String) -> android.os.ParcelFileDescriptor?)? = null,
+        private val remoteCovers: (() -> com.lonx.lyrico.remote.integration.RemoteCoverCache?)? = null,
     ) :
         Fetcher.Factory<CoverRequest> {
         override fun create(
@@ -119,7 +157,8 @@ class AudioCoverFetcher(
             posterReader = posterReader,
             request = data,
             options = options,
-            remoteCopy = remoteCopy
+            remoteDescriptor = remoteDescriptor,
+            remoteCovers = remoteCovers?.invoke()
         )
     }
 }

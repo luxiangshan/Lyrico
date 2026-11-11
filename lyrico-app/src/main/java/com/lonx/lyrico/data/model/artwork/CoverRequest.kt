@@ -24,7 +24,12 @@ data class CoverRequest(
      * 单曲编辑页已经按 ArtistPosterGrouping 分配了内嵌图片；这里只为没有内嵌图片的
      * 艺术家位查外置文件，避免重新读取已编辑的标签或显示其他艺术家的兜底图片。
      */
-    val skipEmbeddedPictures: Boolean = false
+    val skipEmbeddedPictures: Boolean = false,
+    /**
+     * Lyrico Mod: file size as stored in the library (0 = unknown). Together with [uri] and
+     * [lastUpdate] it keys the disk cache of remote songs' embedded covers.
+     */
+    val fileSize: Long = 0L
 ) {
     companion object {
         /**

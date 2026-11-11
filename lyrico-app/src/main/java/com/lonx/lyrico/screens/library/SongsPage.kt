@@ -131,6 +131,8 @@ fun SongsPage(
     var showMenuSheet by remember { mutableStateOf(false) }
     var showDetailSheet by remember { mutableStateOf(false) }
     var selectedSong by remember { mutableStateOf<SongEntity?>(null) }
+    // Lyrico Mod: first-launch "add folder" offers the same choices as the folder manager.
+    var showAddFolderSheet by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         viewModel.clearSearch()
@@ -187,6 +189,38 @@ fun SongsPage(
         stringResource(R.string.refreshing),
         stringResource(R.string.refresh_success)
     )
+    com.lonx.lyrico.ui.components.base.ItemMenuBottomSheet(
+        show = showAddFolderSheet,
+        label = stringResource(R.string.action_add_folder),
+        onDismissRequest = { showAddFolderSheet = false },
+    ) {
+        com.lonx.lyrico.screens.addFolderChoices().forEach { choice ->
+            com.lonx.lyrico.ui.components.base.ItemMenuAction(
+                title = stringResource(choice.labelRes),
+                icon = when (choice.type) {
+                    null -> LucideIcons.FolderPlus
+                    com.lonx.lyrico.remote.RemoteType.CLOUD115 -> LucideIcons.CloudDownload
+                    com.lonx.lyrico.remote.RemoteType.SMB -> LucideIcons.Database
+                    else -> LucideIcons.Link
+                },
+                onClick = {
+                    showAddFolderSheet = false
+                    val type = choice.type
+                    if (type == null) {
+                        folderPickerLauncher.launch(null)
+                    } else {
+                        // Saving the location registers its folders and queues a scan, then returns here.
+                        navigator.navigate(
+                            com.ramcosta.composedestinations.generated.destinations.RemoteLocationDestination(
+                                type = type.name,
+                                configId = com.lonx.lyrico.screens.NEW_REMOTE_LOCATION
+                            )
+                        )
+                    }
+                }
+            )
+        }
+    }
     val pageContent: @Composable (PaddingValues) -> Unit = { paddingValues ->
         Box(
             modifier = Modifier
@@ -213,7 +247,7 @@ fun SongsPage(
                                 title = stringResource(R.string.song_list_empty_title),
                                 icon = LucideIcons.FolderPlus,
                                 actionText = stringResource(R.string.action_add_folder),
-                                onAction = { folderPickerLauncher.launch(null) },
+                                onAction = { showAddFolderSheet = true },
                             )
                         }
 

@@ -182,8 +182,25 @@ class AudioTagRepositoryImpl(
     ): AudioTagData {
         val accessTrace = mutableListOf<String>()
         var stage = "open-readable-descriptor"
+        val remote = fileAccess.isRemote(uri)
         try {
-            fileAccess.openReadableDescriptor(uri) { if (accessTrace.size < 8) accessTrace += it }?.use { descriptor ->
+            if (remote) {
+                // Lyrico Mod: remote files are read through a partial-read proxy descriptor (only the
+                // byte ranges TagLib touches are fetched); on failure retry once with a full download.
+                val data = try {
+                    readRemote(uri, displayName, strict, options, allowPartial = true, accessTrace)
+                } catch (first: Exception) {
+                    if (first is kotlinx.coroutines.CancellationException) throw first
+                    accessTrace += "partialReadFailed=${first.message}"
+                    stage = "read-taglib-full-download"
+                    readRemote(uri, displayName, strict, options, allowPartial = false, accessTrace)
+                }
+                appLogRepository.recordOperation(AppLogType.METADATA, TAG, "Audio tags read",
+                    "uri=$uri\nname=$displayName\nstrict=$strict\ndurationMs=${data.durationMilliseconds}\n" +
+                        "pictures=${data.pictures.map { it.type }}\n" + accessTrace.joinToString("\n"), uri)
+                return data
+            }
+            fileAccess.openReadableDescriptor(uri, { if (accessTrace.size < 8) accessTrace += it })?.use { descriptor ->
                 stage = "read-taglib"
                 return AudioTagReader.read(
                     pfd = descriptor,
@@ -204,6 +221,29 @@ class AudioTagRepositoryImpl(
                 "uri=$uri\nname=$displayName\nstrict=$strict\nstage=$stage\n" +
                     accessTrace.joinToString("\n") + "\n${error.stackTraceToString()}", uri, AppLogLevel.ERROR)
             throw error
+        }
+    }
+
+    private suspend fun readRemote(
+        uri: String,
+        displayName: String,
+        strict: Boolean,
+        options: AudioTagReadOptions,
+        allowPartial: Boolean,
+        accessTrace: MutableList<String>,
+    ): AudioTagData = withContext(ioDispatcher) {
+        val descriptor = fileAccess.openReadableDescriptor(
+            uri, { if (accessTrace.size < 8) accessTrace += it }, allowPartial
+        ) ?: throw java.io.FileNotFoundException("Unable to open remote file: $uri")
+        descriptor.use {
+            AudioTagReader.read(
+                pfd = it,
+                readPictures = true,
+                multiValueSeparator = options.multiValueSeparator,
+                // Partial reads must fail loudly so the caller can fall back to a full download.
+                strict = strict || allowPartial,
+                audioPropertiesReadStyle = com.lonx.audiotag.model.AudioPropertiesReadStyle.Fast,
+            ).copy(fileName = displayName)
         }
     }
 

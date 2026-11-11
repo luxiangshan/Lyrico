@@ -27,6 +27,7 @@ import com.lonx.lyrico.remote.integration.RemoteLibraryScanner
 import com.lonx.lyrico.remote.integration.RemoteRootFolder
 import com.lonx.lyrico.remote.integration.RemoteScanResult
 import com.lonx.lyrico.remote.integration.RemoteUri
+import com.lonx.lyrico.remote.integration.RemoteCoverPick
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -135,7 +136,6 @@ class LibraryScanRepositoryImpl(
                         ScanCandidate(it.songFile, it.rootFolderId, it.folderPath, RemoteUri.SOURCE, it.configId, it.entry)
                     }
             val rootFolderById = safFolderById + remoteRootById.mapValues { it.value.folder }
-            val prefetched = mutableSetOf<String>()
 
             appLogRepository.recordOperation(AppLogType.APP, TAG, "Scan enumeration finished",
                 "fullRescan=${request.fullRescan}\nignoreShortAudio=${request.ignoreShortAudio}\nindexLyrics=$indexLyrics\n" +
@@ -152,47 +152,50 @@ class LibraryScanRepositoryImpl(
                 )
             )
 
-            fun candidateNeedsUpdate(candidate: ScanCandidate): Boolean {
-                val file = candidate.songFile
-                val dbInfo = dbSongMap[file.uri.toString()]
-                return request.fullRescan ||
-                    dbInfo == null ||
-                    dbInfo.fileLastModified != file.lastModified ||
-                    dbInfo.fileSize != file.fileSize ||
-                    dbInfo.filePath != file.filePath
+            // Lyrico Mod: candidates are processed in windows. Within a window the per-file plan (and the
+            // folder rows) are prepared sequentially, tag reads run in parallel (remote files with
+            // REMOTE_CONCURRENCY partial reads, local files one at a time as before), and results are then
+            // applied in order. New/changed songs are written to the database every FLUSH_EVERY songs so
+            // the song list fills progressively during long (remote) scans.
+            val remoteSemaphore = Semaphore(REMOTE_CONCURRENCY)
+            val localSemaphore = Semaphore(1)
+            val pendingFlush = mutableListOf<ScannedSongMetadata>()
+            var processed = 0
+
+            suspend fun flushPending() {
+                if (pendingFlush.isEmpty()) return
+                val batch = pendingFlush.toList()
+                pendingFlush.clear()
+                writeSongs(batch, indexLyrics)
             }
 
-            for ((index, scannedSong) in candidates.withIndex()) {
-                val deviceSong = scannedSong.songFile
-                try {
-                    val deviceUriString = deviceSong.uri.toString()
-                    val dbInfo = dbSongMap[deviceUriString]
-                    // Kept inline (not candidateNeedsUpdate) so `dbInfo` is smart-cast below.
-                    val needsUpdate = request.fullRescan ||
-                        dbInfo == null ||
-                        dbInfo.fileLastModified != deviceSong.lastModified ||
-                        dbInfo.fileSize != deviceSong.fileSize ||
-                        dbInfo.filePath != deviceSong.filePath
-                    val knownDuration = when {
-                        deviceSong.duration > 0L -> deviceSong.duration
-                        !needsUpdate -> dbInfo.durationMilliseconds.toLong()
-                        else -> 0L
-                    }
-
-                    if (
-                        request.ignoreShortAudio &&
-                        knownDuration > 0L &&
-                        knownDuration <= minDuration
-                    ) {
-                        filteredShort++
-                        if (filteredShort <= 20) appLogRepository.recordOperation(AppLogType.APP, TAG, "Scan skipped short audio",
-                            "uri=$deviceUriString\ndurationMs=$knownDuration\nthresholdMs=$minDuration", deviceUriString)
-                        continue
-                    }
-
-                    if (needsUpdate) {
-                        if (scannedSong.remoteConfigId != null && deviceUriString !in prefetched) {
-                            prefetchRemote(candidates, index, prefetched, ::candidateNeedsUpdate)
+            for (window in candidates.withIndex().chunked(SCAN_WINDOW)) {
+                val plans = mutableListOf<ScanPlan>()
+                for ((index, scannedSong) in window) {
+                    val deviceSong = scannedSong.songFile
+                    try {
+                        val deviceUriString = deviceSong.uri.toString()
+                        val dbInfo = dbSongMap[deviceUriString]
+                        val needsUpdate = request.fullRescan ||
+                            dbInfo == null ||
+                            dbInfo.fileLastModified != deviceSong.lastModified ||
+                            dbInfo.fileSize != deviceSong.fileSize ||
+                            dbInfo.filePath != deviceSong.filePath
+                        val knownDuration = when {
+                            deviceSong.duration > 0L -> deviceSong.duration
+                            !needsUpdate -> dbInfo.durationMilliseconds.toLong()
+                            else -> 0L
+                        }
+                        if (request.ignoreShortAudio && knownDuration > 0L && knownDuration <= minDuration) {
+                            filteredShort++
+                            if (filteredShort <= 20) appLogRepository.recordOperation(AppLogType.APP, TAG, "Scan skipped short audio",
+                                "uri=$deviceUriString\ndurationMs=$knownDuration\nthresholdMs=$minDuration", deviceUriString)
+                            plans += ScanPlan(index, scannedSong, ScanAction.SKIP)
+                            continue
+                        }
+                        if (!needsUpdate) {
+                            plans += ScanPlan(index, scannedSong, ScanAction.UNCHANGED)
+                            continue
                         }
                         val rootFolder = rootFolderById[scannedSong.rootFolderId]
                         val folderId = folderDao.upsertScannedFolderTreeAndGetLeafId(
@@ -201,58 +204,97 @@ class LibraryScanRepositoryImpl(
                             isIgnored = rootFolder?.isIgnored ?: false
                         )
                         impactedFolderIds.add(folderId)
-
-                        val metadata = extractSongMetadata(
-                            songFile = deviceSong,
-                            folderId = folderId,
-                            existingId = dbInfo?.id ?: 0L,
-                            source = scannedSong.source,
-                            indexLyrics = indexLyrics
-                        )
-
-                        if (
-                            request.ignoreShortAudio &&
-                            metadata != null &&
-                            metadata.entity.durationMilliseconds > 0 &&
-                            metadata.entity.durationMilliseconds <= minDuration
-                        ) {
-                            filteredShort++
-                            if (filteredShort <= 20) appLogRepository.recordOperation(AppLogType.APP, TAG, "Scan skipped short audio after tag read",
-                                "uri=$deviceUriString\ndurationMs=${metadata.entity.durationMilliseconds}\nthresholdMs=$minDuration", deviceUriString)
-                            continue
-                        }
-
-                        metadata?.let(songsToUpsert::add)
-                    } else {
-                        unchanged++
-                        if (indexLyrics) unchangedSongUris.add(deviceUriString)
+                        plans += ScanPlan(index, scannedSong, ScanAction.READ, folderId, dbInfo?.id ?: 0L)
+                    } catch (e: Exception) {
+                        if (e is kotlinx.coroutines.CancellationException) throw e
+                        plans += ScanPlan(index, scannedSong, ScanAction.FAILED, error = e)
                     }
+                }
 
-                    deviceUris.add(deviceUriString)
-                } catch (e: Exception) {
-                    if (e is kotlinx.coroutines.CancellationException) throw e
-                    // The file was enumerated; a read failure alone cannot confirm its deletion.
-                    deviceUris.add(deviceSong.uri.toString())
-                    Log.e(TAG, "Failed to process song: ${deviceSong.fileName}", e)
-                    failures.add(
-                        LibraryScanFailure(
-                            uri = deviceSong.uri.toString(),
-                            fileName = deviceSong.fileName,
-                            stage = LibraryScanFailureStage.ReadingMetadata,
-                            message = e.message ?: e::class.java.simpleName,
-                            throwable = e
-                        )
-                    )
-                } finally {
+                val results: List<Result<ScannedSongMetadata?>?> = coroutineScope {
+                    plans.map { plan ->
+                        if (plan.action != ScanAction.READ) return@map null
+                        val semaphore = if (plan.candidate.remoteConfigId != null) remoteSemaphore else localSemaphore
+                        async(Dispatchers.IO) {
+                            semaphore.withPermit {
+                                try {
+                                    Result.success(
+                                        extractSongMetadata(
+                                            songFile = plan.candidate.songFile,
+                                            folderId = plan.folderId,
+                                            existingId = plan.existingId,
+                                            source = plan.candidate.source,
+                                            indexLyrics = indexLyrics,
+                                            remote = plan.candidate.remoteConfigId != null,
+                                        )
+                                    )
+                                } catch (e: Exception) {
+                                    if (e is kotlinx.coroutines.CancellationException) throw e
+                                    Result.failure(e)
+                                }
+                            }
+                        }
+                    }.map { it?.await() }
+                }
+
+                for ((i, plan) in plans.withIndex()) {
+                    val deviceSong = plan.candidate.songFile
+                    val deviceUriString = deviceSong.uri.toString()
+                    when (plan.action) {
+                        ScanAction.SKIP -> Unit
+                        ScanAction.UNCHANGED -> {
+                            unchanged++
+                            if (indexLyrics) unchangedSongUris.add(deviceUriString)
+                            deviceUris.add(deviceUriString)
+                        }
+                        ScanAction.READ, ScanAction.FAILED -> {
+                            val result = results[i]
+                            val error = plan.error ?: result?.exceptionOrNull()
+                            if (error != null) {
+                                // The file was enumerated; a read failure alone cannot confirm its deletion.
+                                deviceUris.add(deviceUriString)
+                                Log.e(TAG, "Failed to process song: ${deviceSong.fileName}", error)
+                                failures.add(
+                                    LibraryScanFailure(
+                                        uri = deviceUriString,
+                                        fileName = deviceSong.fileName,
+                                        stage = LibraryScanFailureStage.ReadingMetadata,
+                                        message = error.message ?: error::class.java.simpleName,
+                                        throwable = error
+                                    )
+                                )
+                            } else {
+                                val metadata = result?.getOrNull()
+                                if (
+                                    request.ignoreShortAudio &&
+                                    metadata != null &&
+                                    metadata.entity.durationMilliseconds > 0 &&
+                                    metadata.entity.durationMilliseconds <= minDuration
+                                ) {
+                                    filteredShort++
+                                    if (filteredShort <= 20) appLogRepository.recordOperation(AppLogType.APP, TAG, "Scan skipped short audio after tag read",
+                                        "uri=$deviceUriString\ndurationMs=${metadata.entity.durationMilliseconds}\nthresholdMs=$minDuration", deviceUriString)
+                                } else {
+                                    if (metadata != null) {
+                                        songsToUpsert.add(metadata)
+                                        pendingFlush.add(metadata)
+                                    }
+                                    deviceUris.add(deviceUriString)
+                                }
+                            }
+                        }
+                    }
+                    processed++
                     onProgress(
                         LibraryScanProgress(
                             stage = LibraryScanStage.READING_METADATA,
-                            current = index + 1,
+                            current = processed,
                             total = candidates.size,
                             currentFile = deviceSong.fileName
                         )
                     )
                 }
+                if (pendingFlush.size >= FLUSH_EVERY) flushPending()
             }
 
             val missingSafFolderIds = safScanResult.missingFolderIds
@@ -313,23 +355,9 @@ class LibraryScanRepositoryImpl(
             )
 
             database.withTransaction {
-                songsToUpsert.chunked(BATCH_SIZE).forEach { chunk ->
-                    val songs = chunk.map { it.entity }
-                    songDao.upsertAll(songs)
-                    if (indexLyrics) {
-                        LyricFtsIndexer.replaceSongs(songDao, songs)
-                    } else {
-                        songDao.deleteLyricFtsByUris(songs.map { it.uri })
-                    }
-                    chunk.forEach { metadata ->
-                        database.songCustomTagKeyDao().replaceForSong(
-                            songUri = metadata.entity.uri,
-                            keys = metadata.customFields.mapNotNull { field ->
-                                field.key.trim().takeIf { it.isNotBlank() }?.uppercase()
-                            }
-                        )
-                    }
-                }
+                // Songs not yet written by an intermediate flush.
+                upsertSongsLocked(pendingFlush, indexLyrics)
+                pendingFlush.clear()
 
                 lyricsToIndex.chunked(BATCH_SIZE).forEach { rows ->
                     rows.forEach { row ->
@@ -389,6 +417,34 @@ class LibraryScanRepositoryImpl(
         }
     }
 
+    /** Lyrico Mod: writes a batch of scanned songs mid-scan so the list fills progressively. */
+    private suspend fun writeSongs(batch: List<ScannedSongMetadata>, indexLyrics: Boolean) {
+        database.withTransaction {
+            upsertSongsLocked(batch, indexLyrics)
+            batch.map { it.entity.folderId }.distinct().forEach { folderDao.refreshSongCount(it) }
+        }
+    }
+
+    private suspend fun upsertSongsLocked(batch: List<ScannedSongMetadata>, indexLyrics: Boolean) {
+        batch.chunked(BATCH_SIZE).forEach { chunk ->
+            val songs = chunk.map { it.entity }
+            songDao.upsertAll(songs)
+            if (indexLyrics) {
+                LyricFtsIndexer.replaceSongs(songDao, songs)
+            } else {
+                songDao.deleteLyricFtsByUris(songs.map { it.uri })
+            }
+            chunk.forEach { metadata ->
+                database.songCustomTagKeyDao().replaceForSong(
+                    songUri = metadata.entity.uri,
+                    keys = metadata.customFields.mapNotNull { field ->
+                        field.key.trim().takeIf { it.isNotBlank() }?.uppercase()
+                    }
+                )
+            }
+        }
+    }
+
     /** Remote roots touched by this request (all of them for a full-library scan). */
     private suspend fun selectRemoteRoots(folderIds: Set<Long>?): List<RemoteRootFolder> {
         val scanner = remoteScanner ?: return emptyList()
@@ -400,42 +456,6 @@ class LibraryScanRepositoryImpl(
             val rootPath = root.folder.path.trimEnd('/')
             root.folder.id in folderIds || selectedPaths.any { it.startsWith("$rootPath/") }
         }
-    }
-
-    /**
-     * Downloads the next few remote files that need a tag read (at most [REMOTE_CONCURRENCY] in parallel),
-     * so the sequential tag-read loop then finds them in the local cache.
-     */
-    private suspend fun prefetchRemote(
-        candidates: List<ScanCandidate>,
-        fromIndex: Int,
-        prefetched: MutableSet<String>,
-        needsUpdate: (ScanCandidate) -> Boolean,
-    ) {
-        val cache = remoteScanner?.fileCache ?: return
-        val batch = mutableListOf<ScanCandidate>()
-        var i = fromIndex
-        while (i < candidates.size && batch.size < REMOTE_PREFETCH_WINDOW) {
-            val candidate = candidates[i]
-            val uri = candidate.songFile.uri.toString()
-            if (candidate.remoteConfigId != null && uri !in prefetched && needsUpdate(candidate)) batch += candidate
-            i++
-        }
-        val semaphore = Semaphore(REMOTE_CONCURRENCY)
-        coroutineScope {
-            batch.map { candidate ->
-                async(Dispatchers.IO) {
-                    semaphore.withPermit {
-                        val entry = candidate.remoteEntry ?: return@withPermit
-                        // Errors surface again (and are recorded) when the loop reads this file.
-                        runCatching { cache.ensureLocal(candidate.remoteConfigId!!, entry.path, entry) }
-                            .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
-                        Unit
-                    }
-                }
-            }.awaitAll()
-        }
-        batch.forEach { prefetched += it.songFile.uri.toString() }
     }
 
     /** Remote sub-folders left without songs (the chosen roots themselves are kept). */
@@ -472,7 +492,8 @@ class LibraryScanRepositoryImpl(
         folderId: Long,
         existingId: Long,
         source: String,
-        indexLyrics: Boolean
+        indexLyrics: Boolean,
+        remote: Boolean = false,
     ): ScannedSongMetadata? {
         val audioData = audioTagRepository.read(
             uri = songFile.uri.toString(),
@@ -481,6 +502,16 @@ class LibraryScanRepositoryImpl(
                 multiValueSeparator = settingsRepository.separator.first()
             )
         )
+        if (remote) {
+            // Lyrico Mod: keep the embedded cover so song lists show it right away (keyed like the list's
+            // CoverRequest: uri + library file size + library mtime).
+            remoteScanner?.readAccess?.coverCache?.put(
+                songFile.uri.toString(),
+                songFile.fileSize,
+                songFile.lastModified,
+                RemoteCoverPick.frontCover(audioData.pictures)
+            )
+        }
         val entity = songMetadataMapper.fromScannedFile(
             file = songFile,
             tag = audioData,
@@ -554,6 +585,17 @@ class LibraryScanRepositoryImpl(
         val remoteEntry: com.lonx.lyrico.remote.RemoteEntry? = null,
     )
 
+    private enum class ScanAction { SKIP, UNCHANGED, READ, FAILED }
+
+    private class ScanPlan(
+        val index: Int,
+        val candidate: ScanCandidate,
+        val action: ScanAction,
+        val folderId: Long = 0L,
+        val existingId: Long = 0L,
+        val error: Exception? = null,
+    )
+
     private data class ScannedSongMetadata(
         val entity: SongEntity,
         val customFields: List<CustomTagField>,
@@ -563,7 +605,11 @@ class LibraryScanRepositoryImpl(
     private companion object {
         const val TAG = "LibraryScanRepository"
         const val BATCH_SIZE = 50
-        const val REMOTE_CONCURRENCY = 3
-        const val REMOTE_PREFETCH_WINDOW = 6
+        /** Parallel tag reads of remote files (each a partial-read proxy descriptor). */
+        const val REMOTE_CONCURRENCY = 6
+        /** Candidates planned / read together; results are applied in order per window. */
+        const val SCAN_WINDOW = 24
+        /** Write new/changed songs to the database every this many songs during a scan. */
+        const val FLUSH_EVERY = 20
     }
 }

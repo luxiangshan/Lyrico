@@ -57,6 +57,7 @@ internal object Cloud115Const {
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS) // QR status endpoint long-polls
         .writeTimeout(120, TimeUnit.SECONDS)
+        .connectionPool(okhttp3.ConnectionPool(8, 5, TimeUnit.MINUTES))
         .build()
 }
 

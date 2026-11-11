@@ -792,13 +792,14 @@ fun FolderManagerScreen(
 private const val ROOT_FOLDER_ID = -1L
 
 /** Nav arg value for "add a new remote location" (avoids an empty string nav argument). */
-private const val NEW_REMOTE_LOCATION = "new"
+internal const val NEW_REMOTE_LOCATION = "new"
 
 // ---------------- Lyrico Mod: remote locations ----------------
 
-private data class AddFolderChoice(val labelRes: Int, val type: RemoteType?)
+internal data class AddFolderChoice(val labelRes: Int, val type: RemoteType?)
 
-private fun addFolderChoices(): List<AddFolderChoice> = listOf(
+/** Shared by the folder manager's add menu and the first-launch "add folder" empty state. */
+internal fun addFolderChoices(): List<AddFolderChoice> = listOf(
     AddFolderChoice(R.string.remote_add_local_folder, null),
     AddFolderChoice(R.string.remote_type_webdav, RemoteType.WEBDAV),
     AddFolderChoice(R.string.remote_type_openlist, RemoteType.OPENLIST),

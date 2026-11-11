@@ -133,7 +133,7 @@ fun SongDetailBottomSheet(
                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     AsyncImage(
-                        model = CoverRequest(song.getUri, song.fileLastModified),
+                        model = CoverRequest(song.getUri, song.fileLastModified, fileSize = song.fileSize),
                         contentDescription = stringResource(R.string.cd_cover),
                         modifier = Modifier
                             .size(104.dp)
@@ -190,7 +190,7 @@ fun SongDetailBottomSheet(
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 AsyncImage(
-                    model = CoverRequest(song.getUri, song.fileLastModified),
+                    model = CoverRequest(song.getUri, song.fileLastModified, fileSize = song.fileSize),
                     contentDescription = stringResource(R.string.cd_cover),
                     modifier = Modifier
                         .size(100.dp)

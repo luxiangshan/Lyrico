@@ -67,6 +67,34 @@ class RemoteFileCache(
         }.also { trim(exclude = it) }
     }
 
+    /**
+     * Lyrico Mod: called after a path's remote content changed through this cache (upload, rename,
+     * delete) so partial-read block caches / entry hints can be dropped.
+     */
+    @Volatile var onPathChanged: ((configId: String, path: String) -> Unit)? = null
+
+    /**
+     * A cached full copy that can serve a read without downloading: a copy holding pending (not yet
+     * uploaded) edits, a copy verified within the last minute, or one whose recorded remote size + mtime
+     * match [known]. No network access; null when a fresh read from the server is needed.
+     */
+    fun reusableCopy(configId: String, path: String, known: RemoteEntry?): File? {
+        val normalized = RemoteUri.normalizePath(path)
+        return withPathLock(configId, normalized) {
+            val file = dataFile(configId, normalized)
+            val meta = readMeta(configId, normalized)
+            if (!file.exists() || meta == null || file.length() != meta.localSize) return@withPathLock null
+            val now = System.currentTimeMillis()
+            val ok = meta.pending ||
+                (known == null && now - meta.verifiedAt < FRESH_WINDOW_MS) ||
+                (known != null && matches(meta, known))
+            if (!ok) return@withPathLock null
+            if (known != null && !meta.pending) writeMeta(configId, normalized, meta.copy(verifiedAt = now))
+            file.setLastModified(now)
+            file
+        }
+    }
+
     /** Local copy if one exists, without any network access (used for list cover thumbnails). */
     fun cachedCopy(configId: String, path: String): File? {
         val normalized = RemoteUri.normalizePath(path)
@@ -148,6 +176,8 @@ class RemoteFileCache(
     fun onRenamed(configId: String, oldPath: String, newPath: String) {
         val oldNorm = RemoteUri.normalizePath(oldPath)
         val newNorm = RemoteUri.normalizePath(newPath)
+        onPathChanged?.invoke(configId, oldNorm)
+        onPathChanged?.invoke(configId, newNorm)
         withPathLock(configId, oldNorm) {
             val oldData = dataFile(configId, oldNorm)
             val meta = readMeta(configId, oldNorm)
@@ -165,6 +195,7 @@ class RemoteFileCache(
 
     fun onDeleted(configId: String, path: String) {
         val normalized = RemoteUri.normalizePath(path)
+        onPathChanged?.invoke(configId, normalized)
         withPathLock(configId, normalized) {
             dataFile(configId, normalized).delete()
             metaFile(configId, normalized).delete()
@@ -210,6 +241,7 @@ class RemoteFileCache(
             if (e is com.lonx.lyrico.remote.RemoteAuthException) storageManager.invalidate(configId)
             throw RemoteUploadException(e.message ?: e::class.java.simpleName, e)
         }
+        onPathChanged?.invoke(configId, path)
         val remote = runCatching { storage.stat(path) }.getOrNull()
         writeMeta(
             configId, path,

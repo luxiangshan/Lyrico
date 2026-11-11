@@ -6,6 +6,7 @@ import com.lonx.audiotag.TagLib
 import com.lonx.audiotag.internal.FdUtils
 import com.lonx.audiotag.model.AudioPicture
 import com.lonx.audiotag.model.AudioPictureType
+import com.lonx.audiotag.model.AudioPropertiesReadStyle
 import com.lonx.audiotag.model.AudioTagData
 import com.lonx.audiotag.model.AudioTagKeys
 import com.lonx.audiotag.model.CustomTagField
@@ -20,14 +21,16 @@ object AudioTagReader {
         pfd: ParcelFileDescriptor,
         readPictures: Boolean = true,
         multiValueSeparator: String = "/",
-        strict: Boolean = false
+        strict: Boolean = false,
+        /** Fast reads as little of the file as possible (used for remote files read over the network). */
+        audioPropertiesReadStyle: AudioPropertiesReadStyle = AudioPropertiesReadStyle.Average,
     ): AudioTagData {
         return withContext(Dispatchers.IO) {
             try {
                 val nativeFd = FdUtils.getNativeFd(pfd)
 
                 // 读取音频属性
-                val audioProps = TagLib.getAudioProperties(nativeFd)
+                val audioProps = TagLib.getAudioProperties(nativeFd, audioPropertiesReadStyle)
 
                 // 读取 Metadata
                 val metaFd = FdUtils.getNativeFd(pfd)

@@ -83,7 +83,7 @@ fun SongListItemContent(
                 .background(LyricoColors.coverPlaceholder)
         ) {
             AsyncImage(
-                model = CoverRequest(song.getUri, song.fileLastModified),
+                model = CoverRequest(song.getUri, song.fileLastModified, fileSize = song.fileSize),
                 contentDescription = song.title,
                 modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,

@@ -18,7 +18,14 @@
 ### 2. 扫描
 - 递归遍历所选远程文件夹（跳过隐藏目录、`@eaDir`、`#recycle` 等），支持与本地相同的扩展名：mp3、flac、m4a、ogg、opus、wav、aac、wma、ape。
 - 歌曲写入原有歌曲表，`uri` 形如 `remote://<位置ID>/<URL 编码路径>`，`source = REMOTE`；文件路径显示为 `remote://<位置ID>/目录/文件名`。
-- 读取标签时把文件下载到缓存再走原有 TagLib 路径；并发下载 3 个；大小+修改时间未变的文件直接跳过。
+- **部分读取**：读取标签不再下载整首歌。远程文件通过 `StorageManager.openProxyFileDescriptor` 生成只读代理文件描述符（`RemoteProxyFd`，每个描述符一个 HandlerThread），TagLib 读到哪里才用 `RemoteStorage.openRange` 按 256 KB 分块拉取哪里（`RemoteBlockReader`；全局 LRU 64 块≈16 MB；连续读到第 3 块后才预读 1 块；失败重试 1 次）。远程扫描时音频属性用 TagLib 的 Fast 模式。典型 MP3/FLAC 只需读取文件头尾约 0.5–0.8 MB。
+  - 若已有有效的完整缓存副本（待上传的修改，或远程大小+修改时间未变），直接读本地副本，不联网。
+  - 某个文件用部分读取解析失败时，仅对该文件退回整文件下载后重试。
+  - 列表扫描得到的文件信息（大小/修改时间）会缓存 10 分钟，读标签时不必再 stat 一次。
+  - OpenList 的下载地址缓存 4 分钟（不必每个分块都调用 `/api/fs/get`）；HTTP 连接池扩为 8 个保活连接。
+- 远程文件 6 个并行读取（`LibraryScanRepositoryImpl.REMOTE_CONCURRENCY`），本地文件仍逐个读取；大小+修改时间未变的文件直接跳过。
+- **歌曲列表逐步出现**：扫描中每 20 首（`FLUSH_EVERY`）写一次数据库，不再等全部扫完。
+- **列表封面**：扫描时顺带把内嵌封面（前封面，否则第一张图）存入磁盘封面缓存（`cacheDir/remote-covers`，64 MB，按 歌曲 uri + 文件大小 + 修改时间 区分；无封面的歌曲也记录，避免反复读取）。列表封面先查该缓存，没有则通过部分读取现场提取并写入缓存；Coil 的缓存键包含“是否已缓存”，封面可用后列表项重新加载。文件被修改/重命名/删除后对应封面缓存失效。
 - 手动刷新曲库（全库扫描）也会扫描远程位置；某个远程位置连不上时只记录失败，不会删除它的歌曲。
 - 本地扫描逻辑不变（远程歌曲不会被本地扫描删除，远程根文件夹不会被“空文件夹清理”删除）。
 
@@ -27,14 +34,18 @@
   先下载到缓存（大小/修改时间未变则复用），在缓存副本上写入，写完后通过 `RemoteStorage.upload` 上传覆盖。
 - 上传失败时：编辑结果保留在缓存中（标记为“待上传”，不会被重新下载覆盖），界面提示失败原因；再次保存或在文件夹管理中「重试上传」即可。
 - 重命名 / 删除远程歌曲直接调用远程存储的 rename / delete。
-- 远程歌曲可播放（先下载到缓存，再通过 FileProvider 交给播放器）。
+- 远程歌曲可播放（先下载到缓存，再通过 FileProvider 交给播放器）。播放、ReplayGain 仍下载完整文件（需要解码全文件）。
+- 打开编辑页读取标签、列表封面使用部分读取；保存时才下载完整文件（已有有效缓存副本则复用）。
 
-### 4. 安全
+### 4. 首次启动
+- 曲库为空时「添加文件夹」按钮弹出与文件夹管理相同的选择：本地文件夹 / WebDAV / OpenList / SMB / 115网盘；远程类型进入同一远程位置添加流程，保存后（登记文件夹并开始扫描）返回曲库页，即视为已添加文件夹。
+
+### 5. 安全
 - 位置配置（类型、名称、地址、共享名、用户名、域、文件夹）保存在 DataStore。
 - 密码、115 Cookie、OpenList Token 等用 Android Keystore 中的 AES-256-GCM 密钥加密后保存（`remote_secrets`），并排除在系统备份之外。
 
 ## 已知限制
-- 列表中的封面只读取已缓存的副本，不会为显示封面而联网下载；打开编辑页或扫描后即可显示。
+- 部分读取依赖系统 AppFuse（`openProxyFileDescriptor`），尚未在真机上验证各格式；失败时会自动退回整文件下载。
 - 缓存上限 1 GB（LRU 清理，待上传文件不清理），位于应用缓存目录，系统清理缓存后需重新下载。
 - 分享、导出等其它直接依赖 content:// 的功能对远程歌曲可能不可用。
 - 同一文件若在服务器端与本地同时被修改，以本地待上传版本为准（覆盖服务器端）。
@@ -51,6 +62,6 @@
 
 ## 主要代码位置
 - `remote/RemoteStorage.kt`：统一接口；`remote/webdav`、`remote/smb`、`remote/cloud115`：各协议实现。
-- `remote/integration/`：配置仓库、加密凭据、存储工厂/管理、缓存与写回、远程扫描、位置服务、编辑界面 ViewModel、115 扫码桥接、二维码生成。
+- `remote/integration/`：配置仓库、加密凭据、存储工厂/管理、缓存与写回、远程扫描、位置服务、编辑界面 ViewModel、115 扫码桥接、二维码生成；部分读取：`RemoteBlockCache.kt`（分块缓存，纯 JVM，有单元测试）、`RemoteProxyFd.kt`、`RemoteReadAccess.kt`、`RemoteCoverCache.kt`。
 - `screens/RemoteLocationScreen.kt`：添加/编辑远程位置与文件夹选择。
 - 修改：`AudioFileAccess`、`AudioTagRepositoryImpl`（写后上传）、`SongFileRepositoryImpl`（远程重命名/删除）、`LibraryScanRepositoryImpl`（远程扫描）、`FolderManagerScreen` / `FolderManagerViewModel`、`FolderDao`、`LibraryFolderRepository`、`AudioCoverFetcher`、`ReplayGainScanner`、`PlaybackRepositoryImpl`、`AppModule`、Gradle 与 ProGuard 配置。

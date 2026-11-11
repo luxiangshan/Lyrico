@@ -39,6 +39,8 @@ class RemoteLibraryScanner(
     private val configRepository: RemoteConfigRepository,
     private val storageManager: RemoteStorageManager,
     val fileCache: RemoteFileCache,
+    /** Partial-read access; listing entries are handed to it so tag reads need no extra stat. */
+    val readAccess: RemoteReadAccess? = null,
 ) {
 
     /** Remote root folders among [allFolders]: FolderEntity rows whose path is a chosen folder of a saved location. */
@@ -97,6 +99,7 @@ class RemoteLibraryScanner(
             if (!RemoteUri.isSupportedAudio(name)) continue
             val uri = RemoteUri.build(root.configId, path)
             if (!seen.add(uri)) continue
+            readAccess?.remember(root.configId, entry.copy(path = path, name = name))
             val displayPath = RemoteUri.displayPath(root.configId, path)
             out += RemoteScannedSong(
                 songFile = SongFile(

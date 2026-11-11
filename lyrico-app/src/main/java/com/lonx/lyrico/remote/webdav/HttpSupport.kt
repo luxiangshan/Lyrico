@@ -90,6 +90,8 @@ internal object HttpSupport {
             .connectTimeout(20, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
             .writeTimeout(120, TimeUnit.SECONDS)
+            // Lyrico Mod: up to 6 parallel partial reads per scan; keep those connections alive.
+            .connectionPool(okhttp3.ConnectionPool(8, 5, TimeUnit.MINUTES))
             .followRedirects(true)
             .followSslRedirects(true)
             .build()

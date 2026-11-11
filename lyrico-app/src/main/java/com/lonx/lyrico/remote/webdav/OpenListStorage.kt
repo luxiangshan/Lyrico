@@ -171,6 +171,25 @@ class OpenListStorage(
 
     override fun openRange(path: String, offset: Long, length: Long): InputStream {
         val p = RemotePaths.normalize(path)
+        // Partial reads issue many ranged requests per file: reuse the resolved download URLs for a while
+        // instead of calling /api/fs/get before every range; re-resolve once if a cached URL fails.
+        downloadUrls[p]?.let { cached ->
+            if (System.currentTimeMillis() - cached.second < DOWNLOAD_URL_TTL_MS) {
+                try {
+                    return downloadFirst(cached.first, p, offset, length)
+                } catch (e: IOException) {
+                    downloadUrls.remove(p)
+                }
+            }
+        }
+        val candidates = resolveDownloadUrls(p)
+        downloadUrls[p] = candidates to System.currentTimeMillis()
+        return downloadFirst(candidates, p, offset, length)
+    }
+
+    private val downloadUrls = java.util.concurrent.ConcurrentHashMap<String, Pair<List<String>, Long>>()
+
+    private fun resolveDownloadUrls(p: String): List<String> {
         val data = try {
             postApi("Read $p", "/api/fs/get", JSONObject().put("path", p).put("password", "")) as? JSONObject
         } catch (e: ApiException) {
@@ -181,8 +200,10 @@ class OpenListStorage(
         val sign = str(data, "sign") ?: ""
         val proxyUrl = "$base/d" + RemotePaths.encodePath(p) + if (sign.isNotEmpty()) "?sign=" + RemotePaths.encodeSegment(sign) else ""
         val rawUrl = str(data, "raw_url")?.takeIf { it.isNotBlank() }?.let { absolutize(it) }
+        return listOfNotNull(rawUrl, proxyUrl).distinct()
+    }
 
-        val candidates = listOfNotNull(rawUrl, proxyUrl).distinct()
+    private fun downloadFirst(candidates: List<String>, p: String, offset: Long, length: Long): InputStream {
         var lastError: IOException? = null
         for (url in candidates) {
             try {
@@ -212,6 +233,7 @@ class OpenListStorage(
 
     override fun upload(path: String, source: File) {
         val p = RemotePaths.normalize(path)
+        downloadUrls.remove(p)
         val body: RequestBody = source.asRequestBody(OCTET)
         api("Upload $p") { tok ->
             Request.Builder().url("$base/api/fs/put").put(body)
@@ -227,6 +249,7 @@ class OpenListStorage(
     override fun rename(path: String, newName: String): String {
         require(newName.isNotBlank() && !newName.contains('/')) { "Invalid file name: $newName" }
         val p = RemotePaths.normalize(path)
+        downloadUrls.remove(p)
         val dst = RemotePaths.join(RemotePaths.parent(p), newName)
         if (dst == p) return p
         postApi("Rename $p", "/api/fs/rename", JSONObject().put("path", p).put("name", newName))
@@ -235,6 +258,7 @@ class OpenListStorage(
 
     override fun delete(path: String) {
         val p = RemotePaths.normalize(path)
+        downloadUrls.remove(p)
         val body = JSONObject().put("dir", RemotePaths.parent(p)).put("names", JSONArray().put(RemotePaths.name(p)))
         try {
             postApi("Delete $p", "/api/fs/remove", body)
@@ -287,6 +311,7 @@ class OpenListStorage(
     private fun message(json: JSONObject) = str(json, "message")?.takeIf { it.isNotBlank() } ?: "code ${json.optInt("code")}"
 
     companion object {
+        private const val DOWNLOAD_URL_TTL_MS = 4 * 60_000L
         const val TOKEN_KEY = "openlist_token"
         internal const val PAGE_SIZE = 200
         private val JSON = "application/json; charset=utf-8".toMediaType()

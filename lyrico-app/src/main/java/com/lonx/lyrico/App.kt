@@ -116,17 +116,24 @@ class App : SaltApplication(), SingletonImageLoader.Factory {
     override fun newImageLoader(context: Context): ImageLoader {
         return ImageLoader.Builder(context)
             .components {
-                add(AudioCoverKeyer())
+                // Lyrico Mod: remote songs' list covers come from the remote cover cache (filled while
+                // scanning), falling back to a partial read of the file over the network.
+                val remoteReadAccess = {
+                    runCatching {
+                        org.koin.core.context.GlobalContext.get()
+                            .get<com.lonx.lyrico.remote.integration.RemoteReadAccess>()
+                    }.getOrNull()
+                }
+                add(AudioCoverKeyer(remoteCoverState = { request ->
+                    remoteReadAccess()?.coverCache
+                        ?.has(request.uri.toString(), request.fileSize, request.lastUpdate) ?: false
+                }))
                 add(com.lonx.lyrico.utils.coil.PosterFileFetcherFactory())
                 add(AudioCoverFetcher.Factory(
                     context.contentResolver,
                     org.koin.core.context.GlobalContext.get().get(),
-                    // Lyrico Mod: remote songs show covers from their cached local copy (no network in lists).
-                    remoteCopy = { uri ->
-                        org.koin.core.context.GlobalContext.get()
-                            .get<com.lonx.lyrico.data.song.file.AudioFileAccess>()
-                            .cachedRemoteCopy(uri)
-                    }
+                    remoteDescriptor = { uri -> remoteReadAccess()?.openRead(uri) },
+                    remoteCovers = { remoteReadAccess()?.coverCache }
                 ))
             }
             .diskCache {

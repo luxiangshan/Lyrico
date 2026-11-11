@@ -246,10 +246,15 @@ val appModule = module {
     single { com.lonx.lyrico.remote.integration.RemoteStorageFactory(get<com.lonx.lyrico.remote.integration.SecureCredentialStore>()) }
     single { com.lonx.lyrico.remote.integration.RemoteStorageManager(get(), get()) }
     single { com.lonx.lyrico.remote.integration.RemoteFileCache(androidContext(), get()) }
-    single { com.lonx.lyrico.remote.integration.RemoteLibraryScanner(get(), get(), get()) }
+    single { com.lonx.lyrico.remote.integration.RemoteReadAccess(androidContext(), get(), get()) }
+    single { com.lonx.lyrico.remote.integration.RemoteLibraryScanner(get(), get(), get(), get()) }
     single { com.lonx.lyrico.remote.integration.RemoteLocationService(get(), get(), get(), get(), get()) }
     factory<com.lonx.lyrico.remote.integration.Cloud115QrBridge> { com.lonx.lyrico.remote.integration.Cloud115QrBridgeImpl() }
-    single { AudioFileAccess(androidContext(), get<com.lonx.lyrico.remote.integration.RemoteFileCache>()) }
+    single { AudioFileAccess(
+        androidContext(),
+        get<com.lonx.lyrico.remote.integration.RemoteFileCache>(),
+        get<com.lonx.lyrico.remote.integration.RemoteReadAccess>(),
+    ) }
     single { ImageMimeTypeDetector() }
     single<ImageBytesFetcher> { DefaultImageBytesFetcher(get(), get()) }
     single { PictureMutationResolver(get(), get()) }

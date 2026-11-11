@@ -23,6 +23,8 @@ class AudioFileAccess(
     private val context: Context,
     /** Lyrico Mod: local copies of `remote://` songs (null in tests / when remote storage is unavailable). */
     private val remoteFileCache: RemoteFileCache? = null,
+    /** Lyrico Mod: partial (ranged) reads of `remote://` songs; null = always download whole files. */
+    private val remoteReadAccess: com.lonx.lyrico.remote.integration.RemoteReadAccess? = null,
 ) {
     /** remote:// uris whose cached copy was opened writable and still needs [finishRemoteWrite]. */
     private val openRemoteWrites: MutableSet<String> = Collections.synchronizedSet(mutableSetOf())
@@ -42,8 +44,17 @@ class AudioFileAccess(
         }?.takeIf { it.isNotBlank() } ?: uriString.substringAfterLast("/")
     }
 
-    fun openReadableDescriptor(uriString: String, trace: (String) -> Unit = {}): ParcelFileDescriptor? {
+    /**
+     * [allowPartial] (remote songs only): serve reads through a partial-read proxy descriptor instead of
+     * downloading the whole file. Pass false to force a full local copy (e.g. retry after a failed read).
+     */
+    fun openReadableDescriptor(
+        uriString: String,
+        trace: (String) -> Unit = {},
+        allowPartial: Boolean = true,
+    ): ParcelFileDescriptor? {
         if (RemoteUri.isRemote(uriString)) {
+            remoteReadAccess?.let { return it.openRead(uriString, allowPartial, trace) }
             val file = remoteLocalCopy(uriString, trace)
             return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
         }
