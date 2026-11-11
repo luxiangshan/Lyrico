@@ -11,6 +11,9 @@ concurrency:
   group: mod-apk-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: 🏗️ 构建 Lyrico Mod APK
@@ -75,3 +78,13 @@ jobs:
             lyrico-app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 30
+
+      - name: 🚀 发布到 Release（预发布）
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="mod-${GITHUB_SHA::7}"
+          files=$(ls lyrico-app/build/outputs/apk/release/*.apk lyrico-app/build/outputs/apk/debug/*.apk 2>/dev/null || true)
+          gh release create "$tag" $files --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --title "Lyrico Mod $tag" --notes-file MOD_CHANGES.md
