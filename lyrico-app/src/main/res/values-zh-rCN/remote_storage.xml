@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Lyrico Mod：远程存储（WebDAV / OpenList / SMB / 115） -->
+<resources>
+    <string name="remote_add_folder">添加文件夹</string>
+    <string name="remote_add_local_folder">本地文件夹</string>
+    <string name="remote_type_115">115网盘</string>
+    <string name="remote_add_title">添加 %1$s</string>
+    <string name="remote_edit_title">编辑 %1$s</string>
+    <string name="remote_field_name">名称</string>
+    <string name="remote_field_url_webdav">服务器地址（如 https://host:port/dav）</string>
+    <string name="remote_field_url_openlist">服务器地址（如 http://host:5244）</string>
+    <string name="remote_field_host_smb">主机（如 192.168.1.10 或 nas.local:445）</string>
+    <string name="remote_field_share">共享名</string>
+    <string name="remote_field_username">用户名</string>
+    <string name="remote_field_username_openlist">用户名（留空为游客）</string>
+    <string name="remote_field_password">密码</string>
+    <string name="remote_field_password_keep">密码（留空则不修改）</string>
+    <string name="remote_field_domain">域（可选）</string>
+    <string name="remote_connect">连接并选择文件夹</string>
+    <string name="remote_connecting">正在连接…</string>
+    <string name="remote_missing_fields">请填写必填项</string>
+    <string name="remote_no_folder_selected">请至少选择一个文件夹</string>
+    <string name="remote_browse_selected">已选择 %1$d 个文件夹</string>
+    <string name="remote_browse_up">上一级</string>
+    <string name="remote_browse_select_current">选择当前文件夹</string>
+    <string name="remote_browse_empty">此文件夹下没有子文件夹</string>
+    <string name="remote_browse_loading">加载中…</string>
+    <string name="remote_save">保存</string>
+    <string name="remote_saved">已保存，开始扫描</string>
+    <string name="remote_back_to_settings">连接设置</string>
+    <string name="remote_qr_hint">使用 115 App 扫描二维码登录</string>
+    <string name="remote_qr_waiting">等待扫码</string>
+    <string name="remote_qr_scanned">已扫码，请在手机上确认</string>
+    <string name="remote_qr_confirmed">已确认，正在登录…</string>
+    <string name="remote_qr_expired">二维码已过期</string>
+    <string name="remote_qr_cancelled">已取消登录</string>
+    <string name="remote_qr_refresh">刷新二维码</string>
+    <string name="remote_qr_use_saved">使用已保存的登录</string>
+    <string name="remote_qr_saved_hint">已登录。如需更换账号，请重新扫码。</string>
+    <string name="remote_action_rescan">重新扫描</string>
+    <string name="remote_action_edit">编辑</string>
+    <string name="remote_action_delete">删除</string>
+    <string name="remote_action_retry_upload">重试上传（%1$d）</string>
+    <string name="remote_delete_title">删除远程文件夹</string>
+    <string name="remote_delete_content">仅从曲库中移除，不会删除远程服务器上的文件。若这是该位置的最后一个文件夹，该位置及其登录信息也会一并删除。</string>
+    <string name="remote_upload_failed">已写入本地缓存，但上传到远程失败：%1$s。请再次保存，或在“文件夹管理”中重试上传。</string>
+    <string name="remote_retry_upload_success">已上传 %1$d 个文件</string>
+    <string name="remote_retry_upload_failed">上传失败：%1$s</string>
+</resources>

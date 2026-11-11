@@ -1,0 +1,77 @@
+name: 🏗️ 构建 Lyrico Mod APK
+
+# Lyrico Mod（远程存储版）：无需任何仓库 Secrets。
+# 使用仓库内置的 lyrico-app/mod-debug.keystore 签名（固定密钥，后续构建可直接覆盖安装）。
+on:
+  push:
+    branches: [ remote-storage ]
+  workflow_dispatch:
+
+concurrency:
+  group: mod-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: 🏗️ 构建 Lyrico Mod APK
+    runs-on: ubuntu-latest
+    env:
+      NDK_VERSION: "29.0.14206865"
+      CMAKE_VERSION: "4.1.2"
+
+    steps:
+      - name: 📥 检出代码
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: 🌏 设置时区
+        uses: szenius/set-timezone@v2.0
+        with:
+          timezoneLinux: "Asia/Shanghai"
+
+      - name: ☕ 设置 JDK 21
+        uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: 'gradle'
+
+      - name: 📦 安装 Android NDK / CMake
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses > /dev/null || true
+          "$SDKMANAGER" --install "ndk;${NDK_VERSION}"
+          # CMake 由 AGP 按 build.gradle.kts 中的版本自动获取；这里尽量预装，失败不影响后续步骤。
+          "$SDKMANAGER" --install "cmake;${CMAKE_VERSION}" || echo "::warning::cmake;${CMAKE_VERSION} 预装失败，交由 AGP 处理"
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: 🔐 赋予 gradlew 执行权限
+        run: chmod +x gradlew
+
+      - name: 🐘 配置 Gradle
+        uses: gradle/actions/setup-gradle@v5
+
+      # 正式版（R8 混淆 + mod 签名，包名 com.lonx.lyrico.mod）。
+      - name: 🛠️ 构建 Release APK（mod 签名）
+        id: release
+        continue-on-error: true
+        run: ./gradlew :lyrico-app:assembleRelease --stacktrace
+
+      # 正式版若失败（例如 R8 规则问题），退回构建 Debug 版（包名 com.lonx.lyrico.mod.debug，同样 mod 签名）。
+      - name: 🛠️ 构建 Debug APK（备用）
+        if: steps.release.outcome != 'success'
+        run: ./gradlew :lyrico-app:assembleDebug --stacktrace
+
+      - name: 📤 上传 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lyrico-Mod
+          path: |
+            lyrico-app/build/outputs/apk/release/*.apk
+            lyrico-app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 30

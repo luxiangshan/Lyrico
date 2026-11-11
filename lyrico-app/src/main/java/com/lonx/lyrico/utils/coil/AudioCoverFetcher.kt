@@ -22,8 +22,17 @@ class AudioCoverFetcher(
     private val contentResolver: ContentResolver,
     private val request: CoverRequest,
     private val posterReader: ArtistPosterReader,
-    private val options: Options
+    private val options: Options,
+    private val remoteCopy: ((String) -> java.io.File?)? = null,
 ) : Fetcher {
+
+    private fun openDescriptor(uri: android.net.Uri): android.os.ParcelFileDescriptor? {
+        if (uri.scheme == "remote") {
+            val file = remoteCopy?.invoke(uri.toString()) ?: return null
+            return android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY)
+        }
+        return contentResolver.openFileDescriptor(uri, "r")
+    }
 
     override suspend fun fetch(): FetchResult? {
         val candidateList = request.candidates.takeIf { it.isNotEmpty() }
@@ -64,7 +73,7 @@ class AudioCoverFetcher(
     ): ByteArray? {
         for (candidate in candidates) {
             val bytes = readArtworkSafely {
-                contentResolver.openFileDescriptor(candidate.uri, "r")?.use { pfd ->
+                openDescriptor(candidate.uri)?.use { pfd ->
                     AudioTagReader.readPicture(
                         pfd = pfd,
                         pictureType = request.pictureType,
@@ -85,7 +94,7 @@ class AudioCoverFetcher(
         if (!request.fallbackToAny) return null
         val firstCandidate = candidates.firstOrNull() ?: return null
         return readArtworkSafely {
-            contentResolver.openFileDescriptor(firstCandidate.uri, "r")?.use { pfd ->
+            openDescriptor(firstCandidate.uri)?.use { pfd ->
                 AudioTagReader.readPicture(
                     pfd = pfd,
                     pictureType = AudioPictureType.FrontCover,
@@ -97,7 +106,8 @@ class AudioCoverFetcher(
 
     class Factory(
         private val contentResolver: ContentResolver,
-        private val posterReader: ArtistPosterReader
+        private val posterReader: ArtistPosterReader,
+        private val remoteCopy: ((String) -> java.io.File?)? = null,
     ) :
         Fetcher.Factory<CoverRequest> {
         override fun create(
@@ -108,7 +118,8 @@ class AudioCoverFetcher(
             contentResolver = contentResolver,
             posterReader = posterReader,
             request = data,
-            options = options
+            options = options,
+            remoteCopy = remoteCopy
         )
     }
 }

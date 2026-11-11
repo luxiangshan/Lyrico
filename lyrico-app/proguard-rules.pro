@@ -47,3 +47,31 @@
 ############################################
 -keep class top.yukonga.miuix.kmp.blur.** { *; }
 
+
+############################################
+# Lyrico Mod：远程存储（smbj / bouncycastle / mbassador / zxing）
+############################################
+-keep class com.hierynomus.** { *; }
+-keep class net.engio.mbassy.** { *; }
+-keep class org.bouncycastle.** { *; }
+-keep class com.google.zxing.** { *; }
+-keep class com.lonx.lyrico.remote.** { *; }
+-dontwarn com.hierynomus.**
+-dontwarn net.engio.mbassy.**
+-dontwarn org.bouncycastle.**
+-dontwarn org.slf4j.**
+-dontwarn org.ietf.jgss.**
+-dontwarn javax.security.auth.**
+-dontwarn javax.naming.**
+-dontwarn javax.el.**
+-dontwarn sun.security.**
+-dontwarn java.awt.**
+-keep class com.rapid7.client.dcerpc.** { *; }
+-dontwarn com.rapid7.client.dcerpc.**
+-dontwarn com.sun.**
+-dontwarn org.slf4j.impl.**
+-dontwarn com.google.errorprone.annotations.**
+-dontwarn com.google.j2objc.annotations.**
+-dontwarn org.checkerframework.**
+-dontwarn javax.annotation.**
+-dontwarn java.lang.invoke.**

@@ -12,13 +12,28 @@ import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.util.Log
 import androidx.core.net.toUri
+import com.lonx.lyrico.R
+import com.lonx.lyrico.remote.integration.RemoteFileCache
+import com.lonx.lyrico.remote.integration.RemoteUri
 import java.io.File
 import java.io.FileNotFoundException
+import java.util.Collections
 
 class AudioFileAccess(
-    private val context: Context
+    private val context: Context,
+    /** Lyrico Mod: local copies of `remote://` songs (null in tests / when remote storage is unavailable). */
+    private val remoteFileCache: RemoteFileCache? = null,
 ) {
+    /** remote:// uris whose cached copy was opened writable and still needs [finishRemoteWrite]. */
+    private val openRemoteWrites: MutableSet<String> = Collections.synchronizedSet(mutableSetOf())
+
+    fun isRemote(uriString: String): Boolean = RemoteUri.isRemote(uriString)
+
     fun getDisplayName(uriString: String): String {
+        if (RemoteUri.isRemote(uriString)) {
+            return RemoteUri.parse(uriString)?.path?.let(RemoteUri::fileName)
+                ?.takeIf { it.isNotBlank() } ?: uriString.substringAfterLast("/")
+        }
         val uri = uriString.toUri()
         return when (uri.scheme) {
             "content" -> getOpenableDisplayName(uri)
@@ -28,6 +43,10 @@ class AudioFileAccess(
     }
 
     fun openReadableDescriptor(uriString: String, trace: (String) -> Unit = {}): ParcelFileDescriptor? {
+        if (RemoteUri.isRemote(uriString)) {
+            val file = remoteLocalCopy(uriString, trace)
+            return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+        }
         val uri = uriString.toUri()
         if (uri.scheme == "file" || uri.scheme.isNullOrBlank()) {
             val file = if (uri.scheme == "file") {
@@ -42,6 +61,14 @@ class AudioFileAccess(
     }
 
     fun openWritableDescriptor(uriString: String, trace: (String) -> Unit = {}): ParcelFileDescriptor? {
+        if (RemoteUri.isRemote(uriString)) {
+            val parsed = RemoteUri.parse(uriString) ?: throw FileNotFoundException(uriString)
+            val cache = remoteFileCache ?: throw FileNotFoundException("Remote storage unavailable: $uriString")
+            val file = cache.beginWrite(parsed.configId, parsed.path)
+            openRemoteWrites += uriString
+            trace("remoteWrite cached=${file.name} size=${file.length()}")
+            return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_WRITE)
+        }
         val uri = uriString.toUri()
         if (uri.scheme == "file" || uri.scheme.isNullOrBlank()) {
             val file = if (uri.scheme == "file") {
@@ -55,8 +82,67 @@ class AudioFileAccess(
         return openContentDescriptor(uri, "rw", trace)
     }
 
+    /**
+     * Lyrico Mod: must be called after the descriptor from [openWritableDescriptor] is closed.
+     * [success] = the tag write succeeded → the cached copy is uploaded back to the remote location
+     * (throws [RemoteFileCache.RemoteUploadException] with a user-facing message on failure; the edited
+     * copy stays pending and can be retried). [success] = false → the copy is discarded.
+     * No-op for local uris or when no remote write is open.
+     */
+    fun finishRemoteWrite(uriString: String, success: Boolean, trace: (String) -> Unit = {}) {
+        if (!RemoteUri.isRemote(uriString) || !openRemoteWrites.remove(uriString)) return
+        val parsed = RemoteUri.parse(uriString) ?: return
+        val cache = remoteFileCache ?: return
+        if (!success) {
+            cache.abortWrite(parsed.configId, parsed.path)
+            trace("remoteWrite aborted")
+            return
+        }
+        try {
+            cache.commitWrite(parsed.configId, parsed.path)
+            trace("remoteWrite uploaded")
+        } catch (e: RemoteFileCache.RemoteUploadException) {
+            trace("remoteWrite uploadFailed=${e.message}")
+            throw RemoteFileCache.RemoteUploadException(
+                context.getString(R.string.remote_upload_failed, e.message ?: ""),
+                e.cause ?: e
+            )
+        }
+    }
+
+    /** Lyrico Mod: renames a remote song; returns (newUri, newDisplayPath) or null on a name conflict. Blocking. */
+    fun renameRemote(uriString: String, newFileName: String): Pair<String, String>? {
+        val parsed = RemoteUri.parse(uriString) ?: throw FileNotFoundException(uriString)
+        val cache = remoteFileCache ?: throw FileNotFoundException("Remote storage unavailable: $uriString")
+        val newPath = cache.renameRemote(parsed.configId, parsed.path, newFileName) ?: return null
+        return RemoteUri.build(parsed.configId, newPath) to RemoteUri.displayPath(parsed.configId, newPath)
+    }
+
+    /** Lyrico Mod: deletes a remote song; false when it was already missing. Blocking. */
+    fun deleteRemote(uriString: String): Boolean {
+        val parsed = RemoteUri.parse(uriString) ?: throw FileNotFoundException(uriString)
+        val cache = remoteFileCache ?: throw FileNotFoundException("Remote storage unavailable: $uriString")
+        return cache.deleteRemote(parsed.configId, parsed.path)
+    }
+
+    /** Cached local copy of a remote song if one exists (no network); null for local uris. */
+    fun cachedRemoteCopy(uriString: String): File? {
+        val parsed = RemoteUri.parse(uriString) ?: return null
+        return remoteFileCache?.cachedCopy(parsed.configId, parsed.path)
+    }
+
+    /** Downloads (or reuses) the local copy of a remote song. Blocking. */
+    fun remoteLocalCopy(uriString: String, trace: (String) -> Unit = {}): File {
+        val parsed = RemoteUri.parse(uriString) ?: throw FileNotFoundException(uriString)
+        val cache = remoteFileCache ?: throw FileNotFoundException("Remote storage unavailable: $uriString")
+        return cache.ensureLocal(parsed.configId, parsed.path).also {
+            trace("remoteRead cached=${it.name} size=${it.length()}")
+        }
+    }
+
     fun createWritePermissionIntentSender(uriString: String, trace: (String) -> Unit = {}): IntentSender? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+        if (RemoteUri.isRemote(uriString)) return null
 
         return try {
             val uri = uriString.toUri()
@@ -74,6 +160,7 @@ class AudioFileAccess(
     }
 
     fun writePermissionFromThrowable(uriString: String, throwable: Throwable, trace: (String) -> Unit = {}): IntentSender? {
+        if (RemoteUri.isRemote(uriString)) return null
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && throwable is RecoverableSecurityException) {
             trace("permissionRequest recoverableSecurityException uri=$uriString")
             return throwable.userAction.actionIntent.intentSender
@@ -93,6 +180,7 @@ class AudioFileAccess(
     }
 
     fun isUriMissing(uri: Uri): Boolean {
+        if (uri.scheme == RemoteUri.SCHEME) return false
         return try {
             context.contentResolver.openFileDescriptor(uri, "r")?.use { }
             false
@@ -106,6 +194,7 @@ class AudioFileAccess(
     }
 
     fun openInputBytes(uri: Uri): ByteArray? {
+        if (uri.scheme == RemoteUri.SCHEME) return remoteLocalCopy(uri.toString()).readBytes()
         return context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
     }
 

@@ -120,7 +120,13 @@ class App : SaltApplication(), SingletonImageLoader.Factory {
                 add(com.lonx.lyrico.utils.coil.PosterFileFetcherFactory())
                 add(AudioCoverFetcher.Factory(
                     context.contentResolver,
-                    org.koin.core.context.GlobalContext.get().get()
+                    org.koin.core.context.GlobalContext.get().get(),
+                    // Lyrico Mod: remote songs show covers from their cached local copy (no network in lists).
+                    remoteCopy = { uri ->
+                        org.koin.core.context.GlobalContext.get()
+                            .get<com.lonx.lyrico.data.song.file.AudioFileAccess>()
+                            .cachedRemoteCopy(uri)
+                    }
                 ))
             }
             .diskCache {

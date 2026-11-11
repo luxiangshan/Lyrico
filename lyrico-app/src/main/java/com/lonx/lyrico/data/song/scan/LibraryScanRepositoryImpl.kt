@@ -23,6 +23,15 @@ import com.lonx.lyrico.data.song.tag.AudioTagRepository
 import com.lonx.lyrico.utils.MediaScanner
 import com.lonx.lyrico.utils.LyricsSearchTextExtractor
 import com.lonx.lyrico.utils.UriUtils
+import com.lonx.lyrico.remote.integration.RemoteLibraryScanner
+import com.lonx.lyrico.remote.integration.RemoteRootFolder
+import com.lonx.lyrico.remote.integration.RemoteScanResult
+import com.lonx.lyrico.remote.integration.RemoteUri
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -36,7 +45,9 @@ class LibraryScanRepositoryImpl(
     private val songMetadataMapper: SongMetadataMapper,
     private val libraryIndexRepository: LibraryIndexRepository,
     private val appLogRepository: AppLogRepository,
-    private val operationLock: LibraryOperationLock
+    private val operationLock: LibraryOperationLock,
+    /** Lyrico Mod: remote (WebDAV / OpenList / SMB / 115) folders. */
+    private val remoteScanner: RemoteLibraryScanner? = null,
 ) : LibraryScanRepository {
 
     private val songDao = database.songDao()
@@ -99,25 +110,64 @@ class LibraryScanRepositoryImpl(
                     )
                 )
             }
+            // Lyrico Mod: enumerate remote folders and merge them into the same processing loop.
+            val remoteRoots = selectRemoteRoots(request.folderIds)
+            val remoteScanResult = if (remoteRoots.isEmpty() || remoteScanner == null) {
+                RemoteScanResult(emptyList(), emptySet(), emptyMap())
+            } else {
+                remoteScanner.scan(remoteRoots)
+            }
+            val remoteRootById = remoteRoots.associateBy { it.folder.id }
+            remoteScanResult.failedFolders.forEach { (folderId, message) ->
+                val root = remoteRootById[folderId]
+                failures.add(
+                    LibraryScanFailure(
+                        uri = root?.folder?.path,
+                        fileName = root?.folder?.path,
+                        stage = LibraryScanFailureStage.Collecting,
+                        message = "无法读取远程目录：$message"
+                    )
+                )
+            }
+            val candidates: List<ScanCandidate> =
+                deviceSongs.map { ScanCandidate(it.songFile, it.rootFolderId, it.folderPath, "SAF") } +
+                    remoteScanResult.songs.map {
+                        ScanCandidate(it.songFile, it.rootFolderId, it.folderPath, RemoteUri.SOURCE, it.configId, it.entry)
+                    }
+            val rootFolderById = safFolderById + remoteRootById.mapValues { it.value.folder }
+            val prefetched = mutableSetOf<String>()
+
             appLogRepository.recordOperation(AppLogType.APP, TAG, "Scan enumeration finished",
                 "fullRescan=${request.fullRescan}\nignoreShortAudio=${request.ignoreShortAudio}\nindexLyrics=$indexLyrics\n" +
                     "roots=${safFolders.map { it.id }}\nfiles=${deviceSongs.size}\n" +
-                    "successfulRoots=${safScanResult.successfulFolderIds}\nfailedRoots=${safScanResult.failedFolderIds}\nmissingRoots=${safScanResult.missingFolderIds}",
+                    "successfulRoots=${safScanResult.successfulFolderIds}\nfailedRoots=${safScanResult.failedFolderIds}\nmissingRoots=${safScanResult.missingFolderIds}\n" +
+                    "remoteRoots=${remoteRoots.map { it.folder.id }}\nremoteFiles=${remoteScanResult.songs.size}\nremoteFailed=${remoteScanResult.failedFolders.keys}",
                 level = if (safScanResult.failedFolderIds.isEmpty()) AppLogLevel.DEBUG else AppLogLevel.WARNING)
 
             onProgress(
                 LibraryScanProgress(
                     stage = LibraryScanStage.READING_METADATA,
                     current = 0,
-                    total = deviceSongs.size
+                    total = candidates.size
                 )
             )
 
-            for ((index, scannedSong) in deviceSongs.withIndex()) {
+            fun candidateNeedsUpdate(candidate: ScanCandidate): Boolean {
+                val file = candidate.songFile
+                val dbInfo = dbSongMap[file.uri.toString()]
+                return request.fullRescan ||
+                    dbInfo == null ||
+                    dbInfo.fileLastModified != file.lastModified ||
+                    dbInfo.fileSize != file.fileSize ||
+                    dbInfo.filePath != file.filePath
+            }
+
+            for ((index, scannedSong) in candidates.withIndex()) {
                 val deviceSong = scannedSong.songFile
                 try {
                     val deviceUriString = deviceSong.uri.toString()
                     val dbInfo = dbSongMap[deviceUriString]
+                    // Kept inline (not candidateNeedsUpdate) so `dbInfo` is smart-cast below.
                     val needsUpdate = request.fullRescan ||
                         dbInfo == null ||
                         dbInfo.fileLastModified != deviceSong.lastModified ||
@@ -141,7 +191,10 @@ class LibraryScanRepositoryImpl(
                     }
 
                     if (needsUpdate) {
-                        val rootFolder = safFolderById[scannedSong.rootFolderId]
+                        if (scannedSong.remoteConfigId != null && deviceUriString !in prefetched) {
+                            prefetchRemote(candidates, index, prefetched, ::candidateNeedsUpdate)
+                        }
+                        val rootFolder = rootFolderById[scannedSong.rootFolderId]
                         val folderId = folderDao.upsertScannedFolderTreeAndGetLeafId(
                             rootPath = rootFolder?.path ?: scannedSong.folderPath,
                             folderPath = scannedSong.folderPath,
@@ -153,7 +206,7 @@ class LibraryScanRepositoryImpl(
                             songFile = deviceSong,
                             folderId = folderId,
                             existingId = dbInfo?.id ?: 0L,
-                            source = "SAF",
+                            source = scannedSong.source,
                             indexLyrics = indexLyrics
                         )
 
@@ -195,7 +248,7 @@ class LibraryScanRepositoryImpl(
                         LibraryScanProgress(
                             stage = LibraryScanStage.READING_METADATA,
                             current = index + 1,
-                            total = deviceSongs.size,
+                            total = candidates.size,
                             currentFile = deviceSong.fileName
                         )
                     )
@@ -216,12 +269,25 @@ class LibraryScanRepositoryImpl(
                 .map { it.uri }
                 .toSet()
 
+            // Lyrico Mod: remote songs that vanished from a successfully listed remote root.
+            val successfulRemoteFolderIds = folderDao
+                .getFolderTreeIds(remoteScanResult.successfulFolderIds)
+                .toSet()
+            val deletedRemoteUris = dbSyncInfos
+                .filter { info ->
+                    info.source == RemoteUri.SOURCE &&
+                        info.folderId in successfulRemoteFolderIds &&
+                        info.uri !in deviceUris
+                }
+                .map { it.uri }
+                .toSet()
+
             val missingFolderSongUris = dbSyncInfos
                 .filter { info -> info.source == "SAF" && info.folderId in missingSafFolderIds }
                 .map { it.uri }
                 .toSet()
 
-            val allDeletedUris = deletedUris + missingFolderSongUris
+            val allDeletedUris = deletedUris + deletedRemoteUris + missingFolderSongUris
             if (allDeletedUris.isNotEmpty()) {
                 impactedFolderIds.addAll(
                     dbSyncInfos
@@ -285,6 +351,7 @@ class LibraryScanRepositoryImpl(
                     .forEach { folderId -> folderDao.refreshSongCount(folderId) }
 
                 folderDao.performPostScanCleanup()
+                if (remoteRoots.isNotEmpty()) deleteEmptyRemoteSubfolders(remoteRoots)
             }
 
             if (songsToUpsert.isNotEmpty()) {
@@ -305,11 +372,11 @@ class LibraryScanRepositoryImpl(
 
             if (failures.isEmpty()) settingsRepository.saveLastScanTime(System.currentTimeMillis())
             val result = LibraryScanResult(
-                scanned = deviceSongs.size,
+                scanned = candidates.size,
                 inserted = songsToUpsert.count { it.isInsert },
                 updated = songsToUpsert.count { !it.isInsert },
                 deleted = allDeletedUris.size,
-                skipped = deviceSongs.size - songsToUpsert.size,
+                skipped = candidates.size - songsToUpsert.size,
                 failures = failures
             )
             logResult(request, result, removedSafFolders, impactedFolderIds.size, filteredShort, unchanged,
@@ -320,6 +387,69 @@ class LibraryScanRepositoryImpl(
             logException("Library synchronization failed", e)
             throw e
         }
+    }
+
+    /** Remote roots touched by this request (all of them for a full-library scan). */
+    private suspend fun selectRemoteRoots(folderIds: Set<Long>?): List<RemoteRootFolder> {
+        val scanner = remoteScanner ?: return emptyList()
+        val allFolders = folderDao.getAllFoldersOnce()
+        val roots = scanner.rootFolders(allFolders)
+        if (folderIds == null) return roots
+        val selectedPaths = allFolders.filter { it.id in folderIds }.map { it.path.trimEnd('/') }
+        return roots.filter { root ->
+            val rootPath = root.folder.path.trimEnd('/')
+            root.folder.id in folderIds || selectedPaths.any { it.startsWith("$rootPath/") }
+        }
+    }
+
+    /**
+     * Downloads the next few remote files that need a tag read (at most [REMOTE_CONCURRENCY] in parallel),
+     * so the sequential tag-read loop then finds them in the local cache.
+     */
+    private suspend fun prefetchRemote(
+        candidates: List<ScanCandidate>,
+        fromIndex: Int,
+        prefetched: MutableSet<String>,
+        needsUpdate: (ScanCandidate) -> Boolean,
+    ) {
+        val cache = remoteScanner?.fileCache ?: return
+        val batch = mutableListOf<ScanCandidate>()
+        var i = fromIndex
+        while (i < candidates.size && batch.size < REMOTE_PREFETCH_WINDOW) {
+            val candidate = candidates[i]
+            val uri = candidate.songFile.uri.toString()
+            if (candidate.remoteConfigId != null && uri !in prefetched && needsUpdate(candidate)) batch += candidate
+            i++
+        }
+        val semaphore = Semaphore(REMOTE_CONCURRENCY)
+        coroutineScope {
+            batch.map { candidate ->
+                async(Dispatchers.IO) {
+                    semaphore.withPermit {
+                        val entry = candidate.remoteEntry ?: return@withPermit
+                        // Errors surface again (and are recorded) when the loop reads this file.
+                        runCatching { cache.ensureLocal(candidate.remoteConfigId!!, entry.path, entry) }
+                            .onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
+                        Unit
+                    }
+                }
+            }.awaitAll()
+        }
+        batch.forEach { prefetched += it.songFile.uri.toString() }
+    }
+
+    /** Remote sub-folders left without songs (the chosen roots themselves are kept). */
+    private suspend fun deleteEmptyRemoteSubfolders(roots: List<RemoteRootFolder>) {
+        val rootIds = roots.map { it.folder.id }.toSet()
+        val all = folderDao.getAllFoldersOnce()
+        val remote = all.filter { RemoteUri.isRemote(it.path) }
+        val removable = remote.filter { folder ->
+            folder.id !in rootIds &&
+                folder.songCount == 0 &&
+                !folder.isIgnored &&
+                remote.none { other -> other.path.startsWith(folder.path.trimEnd('/') + "/") }
+        }.map { it.id }
+        if (removable.isNotEmpty()) folderDao.deleteFoldersPermanently(removable)
     }
 
     private suspend fun removeSafFoldersWithoutPermission(): Int {
@@ -415,6 +545,15 @@ class LibraryScanRepositoryImpl(
         }
     }
 
+    private data class ScanCandidate(
+        val songFile: SongFile,
+        val rootFolderId: Long,
+        val folderPath: String,
+        val source: String,
+        val remoteConfigId: String? = null,
+        val remoteEntry: com.lonx.lyrico.remote.RemoteEntry? = null,
+    )
+
     private data class ScannedSongMetadata(
         val entity: SongEntity,
         val customFields: List<CustomTagField>,
@@ -424,5 +563,7 @@ class LibraryScanRepositoryImpl(
     private companion object {
         const val TAG = "LibraryScanRepository"
         const val BATCH_SIZE = 50
+        const val REMOTE_CONCURRENCY = 3
+        const val REMOTE_PREFETCH_WINDOW = 6
     }
 }

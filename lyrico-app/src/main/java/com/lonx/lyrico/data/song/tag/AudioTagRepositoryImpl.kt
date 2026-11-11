@@ -84,7 +84,7 @@ class AudioTagRepositoryImpl(
             is FieldMutation.Set -> "set"
         } }}\ncustomMutations=${mutation.customFields.size}\npicturesChanged=${mutation.pictureUpdate != PictureUpdate.Unchanged}"
         appLogRepository.recordOperation(AppLogType.METADATA, TAG, "Tag write started", context, uri)
-        val result = try {
+        val localResult: AudioTagWriteResult = try {
             run attempt@ {
                 val current = readStrict(uri)
                 stage = "resolve-mutation"
@@ -141,6 +141,19 @@ class AudioTagRepositoryImpl(
             trace("originalError=${e.stackTraceToString()}")
             fileAccess.writePermissionFromThrowable(uri, e, trace)?.let { AudioTagWriteResult.PermissionRequired(it) }
                 ?: AudioTagWriteResult.Failed(e)
+        }
+        // Lyrico Mod: remote songs are edited on a cached copy; upload it back once the descriptor is closed.
+        val result: AudioTagWriteResult = if (!fileAccess.isRemote(uri)) {
+            localResult
+        } else {
+            stage = "upload-remote"
+            try {
+                fileAccess.finishRemoteWrite(uri, success = localResult is AudioTagWriteResult.Success, trace = trace)
+                localResult
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                AudioTagWriteResult.Failed(e)
+            }
         }
         val outcome = when (result) {
             is AudioTagWriteResult.Success -> "success"

@@ -56,7 +56,8 @@ android {
         }
     }
     defaultConfig {
-        applicationId = "com.lonx.lyrico"
+        // Lyrico Mod：独立包名，可与原版 Lyrico 共存安装
+        applicationId = "com.lonx.lyrico.mod"
         minSdk = 28
         targetSdk = 36
         versionCode = baseVersionCode
@@ -70,6 +71,13 @@ android {
     }
 
     signingConfigs {
+        // Lyrico Mod：仓库内置的固定调试密钥，未配置 LYRICO_KEYSTORE_* 时用于签名，保证每次 CI 构建可覆盖安装。
+        create("mod") {
+            storeFile = file("mod-debug.keystore")
+            storePassword = "lyricomod"
+            keyAlias = "lyricomod"
+            keyPassword = "lyricomod"
+        }
         if (hasReleaseSigning) {
             create("release") {
                 storeFile = file(releaseSigningEnv.getValue("LYRICO_KEYSTORE_PATH")!!)
@@ -82,7 +90,7 @@ android {
 
     buildTypes {
         release {
-            signingConfig = signingConfigs.findByName("release")
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("mod")
             isShrinkResources = true
             isMinifyEnabled = true
             proguardFiles(
@@ -91,8 +99,10 @@ android {
             )
         }
         debug {
+            // 包名为 com.lonx.lyrico.mod.debug，与 mod 正式版、原版均可共存
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
+            signingConfig = signingConfigs.getByName("mod")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -109,6 +119,23 @@ android {
     }
     testOptions {
         unitTests.isIncludeAndroidResources = true
+    }
+    packaging {
+        resources {
+            // smbj / bouncycastle / zxing 的元数据冲突
+            excludes += setOf(
+                "META-INF/DEPENDENCIES",
+                "META-INF/LICENSE*",
+                "META-INF/NOTICE*",
+                "META-INF/INDEX.LIST",
+                "META-INF/*.SF",
+                "META-INF/*.DSA",
+                "META-INF/*.RSA",
+                "META-INF/versions/9/OSGI-INF/MANIFEST.MF",
+                "META-INF/versions/*/module-info.class",
+                "module-info.class",
+            )
+        }
     }
     externalNativeBuild {
         cmake {
@@ -128,7 +155,7 @@ androidComponents {
 
             output.outputFileName.set(
                 output.versionName.map { versionName ->
-                    "Lyrico-$versionName$abiSuffix.apk"
+                    "LyricoMod-$versionName$abiSuffix.apk"
                 }
             )
         }
@@ -148,6 +175,13 @@ dependencies {
 
     // network
     implementation(libs.okhttp)
+    // Lyrico Mod：远程存储（SMB）与 115 扫码登录二维码
+    implementation(libs.smbj)
+    implementation(libs.slf4j.nop)
+    implementation(libs.dcerpc)
+    implementation(libs.zxing.core)
+    testImplementation(libs.mockwebserver3)
+    testImplementation(libs.json.org)
     // JSON 解析
     implementation(libs.kotlinx.serialization.json)
     // Compose & UI

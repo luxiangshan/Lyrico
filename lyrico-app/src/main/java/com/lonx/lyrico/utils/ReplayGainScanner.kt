@@ -150,13 +150,20 @@ class ReplayGainScanner(private val context: Context, private val appLogReposito
         }
     }.flowOn(Dispatchers.IO)
 
+    /** Lyrico Mod: remote songs are decoded from their cached local copy (downloaded if needed). */
+    private fun localDecodeUri(uriString: String): String {
+        if (!com.lonx.lyrico.remote.integration.RemoteUri.isRemote(uriString)) return uriString
+        val access = org.koin.core.context.GlobalContext.get().get<com.lonx.lyrico.data.song.file.AudioFileAccess>()
+        return android.net.Uri.fromFile(access.remoteLocalCopy(uriString)).toString()
+    }
+
     private suspend fun decodeToState(
         uriString: String,
         peakMode: ReplayGainPeakMode,
         onProgress: suspend (Float) -> Unit
     ): ReplayGainDecodeResult {
         try {
-            return decodeWithPlatform(uriString, peakMode, onProgress)
+            return decodeWithPlatform(localDecodeUri(uriString), peakMode, onProgress)
         } catch (platformError: ReplayGainScanException) {
             currentCoroutineContext().ensureActive()
             appLogRepository?.recordOperation(AppLogType.METADATA, "ReplayGainScanner", "Platform decoding failed; trying FFmpeg",
@@ -166,7 +173,7 @@ class ReplayGainScanner(private val context: Context, private val appLogReposito
             var completed = false
             var fallbackMimeType: String? = null
             try {
-                FfmpegAudioDecoder(context, uriString).use { decoder ->
+                FfmpegAudioDecoder(context, localDecodeUri(uriString)).use { decoder ->
                     fallbackMimeType = decoder.mimeType
                     onProgress(0f)
                     val analysisState = LibEbuR128(decoder.channels, decoder.sampleRate, peakMode)

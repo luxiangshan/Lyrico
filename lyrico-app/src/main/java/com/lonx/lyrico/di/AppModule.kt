@@ -240,7 +240,16 @@ val appModule = module {
     single { com.lonx.lyrico.data.LibraryOperationLock() }
     single { LibraryFolderRepository(get(), get(), androidContext(), get(), get()) }
     single { CacheManager(androidContext(), get()) }
-    single { AudioFileAccess(androidContext()) }
+    // Lyrico Mod: remote storage (WebDAV / OpenList / SMB / 115)
+    single { com.lonx.lyrico.remote.integration.SecureCredentialStore(androidContext()) }
+    single { com.lonx.lyrico.remote.integration.RemoteConfigRepository(androidContext(), get()) }
+    single { com.lonx.lyrico.remote.integration.RemoteStorageFactory(get<com.lonx.lyrico.remote.integration.SecureCredentialStore>()) }
+    single { com.lonx.lyrico.remote.integration.RemoteStorageManager(get(), get()) }
+    single { com.lonx.lyrico.remote.integration.RemoteFileCache(androidContext(), get()) }
+    single { com.lonx.lyrico.remote.integration.RemoteLibraryScanner(get(), get(), get()) }
+    single { com.lonx.lyrico.remote.integration.RemoteLocationService(get(), get(), get(), get(), get()) }
+    factory<com.lonx.lyrico.remote.integration.Cloud115QrBridge> { com.lonx.lyrico.remote.integration.Cloud115QrBridgeImpl() }
+    single { AudioFileAccess(androidContext(), get<com.lonx.lyrico.remote.integration.RemoteFileCache>()) }
     single { ImageMimeTypeDetector() }
     single<ImageBytesFetcher> { DefaultImageBytesFetcher(get(), get()) }
     single { PictureMutationResolver(get(), get()) }
@@ -254,7 +263,8 @@ val appModule = module {
     single<SongLibraryRepository> { SongLibraryRepositoryImpl(get(), get(), get(), get()) }
     single<SongSearchRepository> { SongSearchRepositoryImpl(get()) }
     single<LibraryScanRepository> {
-        LibraryScanRepositoryImpl(androidContext(), get(), get(), get(), get(), get(), get(), get(), get())
+        LibraryScanRepositoryImpl(androidContext(), get(), get(), get(), get(), get(), get(), get(), get(),
+            get<com.lonx.lyrico.remote.integration.RemoteLibraryScanner>())
     }
     single { ReadAudioTagsUseCase(get(), get()) }
     single { SaveAudioTagsUseCase(get(), get(), get()) }
@@ -325,7 +335,8 @@ val appModule = module {
     viewModel { com.lonx.lyrico.viewmodel.ProblemReproductionViewModel(get(), get(), get(), get()) }
     viewModel { PluginViewModel(get(), get(), get(), get(), get(), get()) }
 
-    viewModel { FolderManagerViewModel(get(), get(), get(), get()) }
+    viewModel { FolderManagerViewModel(get(), get(), get(), get(), get()) }
+    viewModel { com.lonx.lyrico.remote.integration.RemoteLocationViewModel(get(), get()) }
     viewModel { ArtistPosterFoldersViewModel(get(), get(), get()) }
     viewModel { com.lonx.lyrico.viewmodel.ArtistPosterEditViewModel(get(), get(), get(), get(), get(), get()) }
     viewModel { BatchRenameViewModel(get(), get(), get(), get(), get()) }

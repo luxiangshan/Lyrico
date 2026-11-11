@@ -11,6 +11,7 @@ import com.lonx.lyrico.data.model.log.AppLogLevel
 import com.lonx.lyrico.data.model.log.recordOperation
 import com.lonx.lyrico.data.model.log.newLogOperation
 import com.lonx.lyrico.data.repository.AppLogRepository
+import com.lonx.lyrico.remote.integration.RemoteUri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.withContext
@@ -25,7 +26,9 @@ class SongFileRepositoryImpl(
 ) : SongFileRepository {
 
     override suspend fun deleteFile(song: SongEntity): DeleteSongFileResult = withContext(ioDispatcher + newLogOperation("delete-file")) {
-        val result = if (song.source == "SAF") {
+        val result = if (RemoteUri.isRemote(song.uri)) {
+            deleteRemoteSongFile(song)
+        } else if (song.source == "SAF") {
             deleteSafSongFile(song)
         } else {
             deleteMediaStoreSongFile(song)
@@ -59,7 +62,9 @@ class SongFileRepositoryImpl(
         song: SongEntity,
         newFileName: String
     ): RenameSongFileResult = withContext(ioDispatcher + newLogOperation("rename-file")) {
-        val result = if (song.source == "SAF") {
+        val result = if (RemoteUri.isRemote(song.uri)) {
+            renameRemoteSong(song, newFileName)
+        } else if (song.source == "SAF") {
             renameSafSong(song, newFileName)
         } else {
             renameFilePathSong(song, newFileName)
@@ -80,6 +85,32 @@ class SongFileRepositoryImpl(
                 else -> AppLogLevel.WARNING
             })
         result
+    }
+
+    private fun deleteRemoteSongFile(song: SongEntity): DeleteSongFileResult {
+        return try {
+            if (fileAccess.deleteRemote(song.uri)) DeleteSongFileResult.Deleted
+            else DeleteSongFileResult.AlreadyMissing
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to delete remote song: ${song.uri}", e)
+            DeleteSongFileResult.Failed(e)
+        }
+    }
+
+    private fun renameRemoteSong(song: SongEntity, newFileName: String): RenameSongFileResult {
+        return try {
+            val (newUri, newPath) = fileAccess.renameRemote(song.uri, newFileName)
+                ?: return RenameSongFileResult.NameConflict(newFileName)
+            RenameSongFileResult.Success(
+                oldUri = song.uri,
+                newUri = newUri,
+                newFilePath = newPath,
+                newFileName = RemoteUri.fileName(newPath)
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to rename remote song: ${song.uri}", e)
+            RenameSongFileResult.Failed(e)
+        }
     }
 
     private suspend fun deleteSafSongFile(song: SongEntity): DeleteSongFileResult {

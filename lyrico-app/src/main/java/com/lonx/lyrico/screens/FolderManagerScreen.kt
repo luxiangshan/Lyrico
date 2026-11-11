@@ -118,6 +118,13 @@ import top.yukonga.miuix.kmp.theme.MiuixTheme
 import top.yukonga.miuix.kmp.utils.overScrollVertical
 import top.yukonga.miuix.kmp.utils.scrollEndHaptic
 import top.yukonga.miuix.kmp.window.WindowDialog
+import android.widget.Toast
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
+import com.lonx.lyrico.remote.RemoteConfig
+import com.lonx.lyrico.remote.RemoteType
+import com.lonx.lyrico.remote.integration.RemoteFolderInfo
+import com.ramcosta.composedestinations.generated.destinations.RemoteLocationDestination
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -154,6 +161,41 @@ fun FolderManagerScreen(
         buildFolderTree(folders)
     }
     val context = LocalContext.current
+
+    // ---------------- Lyrico Mod: remote locations ----------------
+    val remoteConfigs = uiState.remoteConfigs
+    val pendingUploads by viewModel.pendingUploads.collectAsState()
+    val remoteMessage by viewModel.remoteMessage.collectAsState()
+    var remoteFolderToDelete by remember { mutableStateOf<FolderEntity?>(null) }
+    LaunchedEffect(Unit) { viewModel.refreshPendingUploads() }
+    LaunchedEffect(remoteMessage) {
+        remoteMessage?.let {
+            Toast.makeText(context, it, Toast.LENGTH_LONG).show()
+            viewModel.consumeRemoteMessage()
+        }
+    }
+    val folderLabel: (FolderEntity) -> String = { folder ->
+        RemoteFolderInfo.resolve(folder, remoteConfigs)?.label()
+            ?: folder.path.substringAfterLast("/").ifBlank { folder.path }
+    }
+    fun openRemoteEditor(type: RemoteType, configId: String = NEW_REMOTE_LOCATION) {
+        navigator.navigate(RemoteLocationDestination(type = type.name, configId = configId))
+    }
+    val retrySuccessFormat = stringResource(R.string.remote_retry_upload_success)
+    val retryFailureFormat = stringResource(R.string.remote_retry_upload_failed)
+    val remoteFolderActions = RemoteFolderActions(
+        configs = remoteConfigs,
+        pendingUploads = pendingUploads,
+        onEdit = { info -> info.config?.let { openRemoteEditor(it.type, it.id) } },
+        onDelete = { folder -> remoteFolderToDelete = folder },
+        onRetryUpload = { info ->
+            viewModel.retryUploads(
+                info.configId,
+                successText = { count -> String.format(retrySuccessFormat, count) },
+                failureText = { message -> String.format(retryFailureFormat, message) }
+            )
+        }
+    )
 
     var currentFolderId by rememberSaveable { mutableLongStateOf(ROOT_FOLDER_ID) }
     var selectedFolderId by rememberSaveable { mutableLongStateOf(ROOT_FOLDER_ID) }
@@ -202,8 +244,8 @@ fun FolderManagerScreen(
         emptyList()
     }
     val rootPathLabel = stringResource(R.string.folder_root_path)
-    val currentBreadcrumbs = remember(currentFolder, currentNode, folderTree, rootPathLabel) {
-        buildFolderBreadcrumbs(currentFolder, currentNode, folderTree, rootPathLabel)
+    val currentBreadcrumbs = remember(currentFolder, currentNode, folderTree, rootPathLabel, remoteConfigs) {
+        buildFolderBreadcrumbs(currentFolder, currentNode, folderTree, rootPathLabel, folderLabel)
     }
     val showConfirmDialog = remember { mutableStateOf(false) }
 
@@ -263,9 +305,7 @@ fun FolderManagerScreen(
     val folderTitle = if (currentFolderId == ROOT_FOLDER_ID) {
         stringResource(R.string.folder_manager_title)
     } else {
-        currentFolder?.path
-            ?.substringAfterLast("/")
-            ?.ifBlank { currentFolder.path }
+        currentFolder?.let(folderLabel)
             ?: stringResource(R.string.folder_manager_title)
     }
     val navigateUpAction: () -> Unit = {
@@ -290,6 +330,7 @@ fun FolderManagerScreen(
     } else null
     val sortPopupState = rememberPopupState()
 
+    CompositionLocalProvider(LocalRemoteFolderActions provides remoteFolderActions) {
     Box(modifier = Modifier.fillMaxSize()) {
         LibraryDetailPage(
             title = folderTitle,
@@ -297,11 +338,29 @@ fun FolderManagerScreen(
             selection = saltSelectionState,
             actions = {
                 if (currentFolderId == ROOT_FOLDER_ID) {
-                    SaltIconButton(
-                        icon = LucideIcons.FolderPlus,
-                        label = stringResource(R.string.folder_manager_title),
-                        onClick = { folderPickerLauncher.launch(null) }
-                    )
+                    val addPopupState = rememberPopupState()
+                    Box {
+                        SaltIconButton(
+                            icon = LucideIcons.FolderPlus,
+                            label = stringResource(R.string.remote_add_folder),
+                            onClick = { addPopupState.expend() }
+                        )
+                        com.moriafly.salt.ui.popup.PopupMenu(
+                            expanded = addPopupState.expend,
+                            onDismissRequest = addPopupState::dismiss
+                        ) {
+                            addFolderChoices().forEach { choice ->
+                                PopupMenuItem(
+                                    text = stringResource(choice.labelRes),
+                                    onClick = {
+                                        addPopupState.dismiss()
+                                        if (choice.type == null) folderPickerLauncher.launch(null)
+                                        else openRemoteEditor(choice.type)
+                                    }
+                                )
+                            }
+                        }
+                    }
                 }
                 if (currentFolder != null && pagerState.currentPage == 1 && currentSongs.isNotEmpty()) {
                     val sortTypes = SortBy.entries.toList()
@@ -379,14 +438,7 @@ fun FolderManagerScreen(
                         )
                     } else {
                         SmallTopAppBar(
-                            title = if (currentFolderId == ROOT_FOLDER_ID) {
-                                stringResource(R.string.folder_manager_title)
-                            } else {
-                                currentFolder?.path
-                                    ?.substringAfterLast("/")
-                                    ?.ifBlank { currentFolder.path }
-                                    ?: stringResource(R.string.folder_manager_title)
-                            },
+                            title = folderTitle,
                             navigationIcon = {
                                 IconButton(
                                     onClick = navigateUpAction
@@ -399,12 +451,23 @@ fun FolderManagerScreen(
                             },
                             actions = {
                                 if (currentFolderId == ROOT_FOLDER_ID) {
-                                    IconButton(
-                                        onClick = { folderPickerLauncher.launch(null) }
+                                    val addEntries = DropdownEntry(
+                                        items = addFolderChoices().map { choice ->
+                                            DropdownItem(
+                                                text = stringResource(choice.labelRes),
+                                                onClick = {
+                                                    if (choice.type == null) folderPickerLauncher.launch(null)
+                                                    else openRemoteEditor(choice.type)
+                                                }
+                                            )
+                                        }
+                                    )
+                                    OverlayIconDropdownMenu(
+                                        entries = listOf(addEntries)
                                     ) {
                                         Icon(
                                             imageVector = LucideIcons.FolderPlus,
-                                            contentDescription = null
+                                            contentDescription = stringResource(R.string.remote_add_folder)
                                         )
                                     }
                                 }
@@ -671,9 +734,87 @@ fun FolderManagerScreen(
             onBatchShare = selectionViewModel::batchShare
         )
     }
+
+    // Lyrico Mod: confirm removal of a remote folder (library only; remote files are kept).
+    remoteFolderToDelete?.let { folder ->
+        val dismiss = { remoteFolderToDelete = null }
+        val confirm = {
+            remoteFolderToDelete = null
+            viewModel.deleteRemoteFolder(folder)
+            if (folder.id == currentFolderId) {
+                navigateToFolder(parentFolder?.id ?: ROOT_FOLDER_ID, forward = false)
+            }
+        }
+        if (salt) com.lonx.lyrico.ui.components.base.YesNoDialog(
+            show = true,
+            title = stringResource(R.string.remote_delete_title),
+            summary = folderLabel(folder) + "\n\n" + stringResource(R.string.remote_delete_content),
+            onDismissRequest = dismiss,
+            onConfirm = confirm,
+        ) else WindowDialog(
+            title = stringResource(R.string.remote_delete_title),
+            show = true,
+            onDismissRequest = dismiss
+        ) {
+            Column {
+                Text(
+                    text = folderLabel(folder),
+                    modifier = Modifier.fillMaxWidth(),
+                    color = MiuixTheme.colorScheme.onBackground
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = stringResource(R.string.remote_delete_content),
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    fontSize = MiuixTheme.textStyles.body2.fontSize
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.SpaceBetween) {
+                    TextButton(
+                        text = stringResource(R.string.cancel),
+                        onClick = dismiss,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(20.dp))
+                    TextButton(
+                        text = stringResource(R.string.confirm),
+                        onClick = confirm,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.textButtonColorsPrimary(),
+                    )
+                }
+            }
+        }
+    }
+    }
 }
 
 private const val ROOT_FOLDER_ID = -1L
+
+/** Nav arg value for "add a new remote location" (avoids an empty string nav argument). */
+private const val NEW_REMOTE_LOCATION = "new"
+
+// ---------------- Lyrico Mod: remote locations ----------------
+
+private data class AddFolderChoice(val labelRes: Int, val type: RemoteType?)
+
+private fun addFolderChoices(): List<AddFolderChoice> = listOf(
+    AddFolderChoice(R.string.remote_add_local_folder, null),
+    AddFolderChoice(R.string.remote_type_webdav, RemoteType.WEBDAV),
+    AddFolderChoice(R.string.remote_type_openlist, RemoteType.OPENLIST),
+    AddFolderChoice(R.string.remote_type_smb, RemoteType.SMB),
+    AddFolderChoice(R.string.remote_type_115, RemoteType.CLOUD115),
+)
+
+private class RemoteFolderActions(
+    val configs: Map<String, RemoteConfig>,
+    val pendingUploads: Map<String, Int>,
+    val onEdit: (RemoteFolderInfo) -> Unit,
+    val onDelete: (FolderEntity) -> Unit,
+    val onRetryUpload: (RemoteFolderInfo) -> Unit,
+)
+
+private val LocalRemoteFolderActions = staticCompositionLocalOf<RemoteFolderActions?> { null }
 
 private data class FolderContentTransition(
     val fromFolderId: Long,
@@ -1245,7 +1386,9 @@ private fun FolderListItem(
     onRefresh: () -> Unit,
     onIgnoredChange: (Boolean) -> Unit
 ) {
-    val folderName = folder.path.substringAfterLast("/").ifBlank { folder.path }
+    val remoteActions = LocalRemoteFolderActions.current
+    val remoteInfo = remoteActions?.let { RemoteFolderInfo.resolve(folder, it.configs) }
+    val folderName = remoteInfo?.label() ?: folder.path.substringAfterLast("/").ifBlank { folder.path }
     val isBusy = isScanning || isQueued || isSelectionMode
     val statusText = when {
         isScanning -> {
@@ -1291,7 +1434,9 @@ private fun FolderListItem(
         add(
             DropdownItem(
                 icon = { modifier -> PreferenceIcon(LucideIcons.RefreshCw, PreferenceIconTone.Tools, modifier = modifier) },
-                text = stringResource(R.string.action_refresh_folder),
+                text = stringResource(
+                    if (remoteInfo?.isRoot == true) R.string.remote_action_rescan else R.string.action_refresh_folder
+                ),
                 onClick = {
                     if (!isBusy) {
                         onRefresh()
@@ -1300,7 +1445,40 @@ private fun FolderListItem(
             )
         )
 
-        if (canRemove) {
+        if (remoteActions != null && remoteInfo != null && remoteInfo.isRoot) {
+            add(
+                DropdownItem(
+                    icon = { modifier -> PreferenceIcon(LucideIcons.Pencil, PreferenceIconTone.Lyrics, modifier = modifier) },
+                    text = stringResource(R.string.remote_action_edit),
+                    onClick = {
+                        if (!isBusy) remoteActions.onEdit(remoteInfo)
+                    }
+                )
+            )
+            val pending = remoteActions.pendingUploads[remoteInfo.configId] ?: 0
+            if (pending > 0) {
+                add(
+                    DropdownItem(
+                        icon = { modifier -> PreferenceIcon(LucideIcons.FileUp, PreferenceIconTone.Teal, modifier = modifier) },
+                        text = stringResource(R.string.remote_action_retry_upload, pending),
+                        onClick = {
+                            if (!isBusy) remoteActions.onRetryUpload(remoteInfo)
+                        }
+                    )
+                )
+            }
+            add(
+                DropdownItem(
+                    icon = { modifier -> PreferenceIcon(LucideIcons.Trash, PreferenceIconTone.Danger, modifier = modifier) },
+                    text = stringResource(R.string.remote_action_delete),
+                    onClick = {
+                        if (!isBusy) remoteActions.onDelete(folder)
+                    }
+                )
+            )
+        }
+
+        if (canRemove && remoteInfo == null) {
             add(
                 DropdownItem(
                     icon = { modifier -> PreferenceIcon(LucideIcons.Folder, PreferenceIconTone.Library, modifier = modifier) },
@@ -1319,7 +1497,8 @@ private fun FolderListItem(
 
     com.lonx.lyrico.ui.components.FolderManagementItem(
         name = folderName,
-        path = folder.path,
+        path = remoteInfo?.subtitle() ?: folder.path,
+        badge = remoteInfo?.typeBadge,
         status = statusText,
         actions = actionEntry,
         enabled = !isBusy,
@@ -1345,7 +1524,8 @@ private fun buildFolderBreadcrumbs(
     currentFolder: FolderEntity?,
     currentNode: FolderTreeNode?,
     folderTree: FolderTree,
-    rootLabel: String
+    rootLabel: String,
+    labelOf: (FolderEntity) -> String = { it.path.substringAfterLast("/").ifBlank { it.path } }
 ): List<FolderBreadcrumb> {
     if (currentFolder == null || currentNode == null) {
         return listOf(FolderBreadcrumb(ROOT_FOLDER_ID, rootLabel))
@@ -1364,8 +1544,7 @@ private fun buildFolderBreadcrumbs(
             add(
                 FolderBreadcrumb(
                     folderId = ancestor.folder.id,
-                    label = ancestor.folder.path.substringAfterLast("/")
-                        .ifBlank { ancestor.folder.path }
+                    label = labelOf(ancestor.folder)
                 )
             )
         }

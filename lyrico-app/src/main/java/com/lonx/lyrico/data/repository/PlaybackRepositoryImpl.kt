@@ -16,6 +16,21 @@ import kotlinx.coroutines.CancellationException
 
 class PlaybackRepositoryImpl(private val settingsRepository: SettingsRepository) : PlaybackRepository {
     override suspend fun play(context: Context, uri: Uri) {
+        // Lyrico Mod: remote songs are played from their cached local copy via FileProvider.
+        val uri = if (uri.scheme == com.lonx.lyrico.remote.integration.RemoteUri.SCHEME) {
+            try {
+                val file = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    org.koin.core.context.GlobalContext.get()
+                        .get<com.lonx.lyrico.data.song.file.AudioFileAccess>()
+                        .remoteLocalCopy(uri.toString())
+                }
+                androidx.core.content.FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+            } catch (error: Exception) {
+                if (error is CancellationException) throw error
+                Toast.makeText(context, context.getString(R.string.player_open_failed), Toast.LENGTH_SHORT).show()
+                return
+            }
+        } else uri
         val savedComponent = try {
             settingsRepository.defaultPlayerComponent.first()
         } catch (error: Exception) {

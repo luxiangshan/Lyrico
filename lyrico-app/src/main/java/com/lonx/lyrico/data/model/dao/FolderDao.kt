@@ -240,12 +240,14 @@ interface FolderDao {
 
     /**
      * 自动删除文件夹需同时满足：没有歌曲、未被手动忽略、不是通过 SAF 选择器添加的。
+     * Lyrico Mod：远程文件夹（remote://）由远程扫描自行清理，这里不自动删除。
      */
     @Query("""
         DELETE FROM folders 
         WHERE songCount = 0 
           AND isIgnored = 0 
           AND addedBySaf = 0
+          AND path NOT LIKE 'remote://%'
           AND NOT EXISTS (
               SELECT 1
               FROM folders AS child

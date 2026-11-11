@@ -11,6 +11,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.ui.Alignment
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -34,6 +38,8 @@ fun FolderManagementItem(
     actions: DropdownEntry,
     enabled: Boolean = true,
     isLoading: Boolean = false,
+    /** Lyrico Mod: small type tag (WebDAV / SMB / …) shown before the name of remote folders. */
+    badge: String? = null,
     onClick: (() -> Unit)? = null
 ) {
     if (com.lonx.lyrico.ui.theme.LocalUiEngine.current == com.lonx.lyrico.data.model.UiEngine.SALT) {
@@ -41,7 +47,7 @@ fun FolderManagementItem(
         com.moriafly.salt.ui.RoundedColumn {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 com.moriafly.salt.ui.Item(
-                    text = name, sub = "$path\n$status", modifier = Modifier.weight(1f),
+                    text = if (badge != null) "[$badge] $name" else name, sub = "$path\n$status", modifier = Modifier.weight(1f),
                     enabled = enabled, onClick = { onClick?.invoke() },
                     arrowType = com.moriafly.salt.ui.ItemArrowType.None,
                 )
@@ -81,7 +87,22 @@ fun FolderManagementItem(
             enabled = enabled,
             onClick = onClick
         ) {
-            Text(name, color = MiuixTheme.colorScheme.onBackground, fontWeight = FontWeight.Medium)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (badge != null) {
+                    Text(
+                        text = badge,
+                        color = MiuixTheme.colorScheme.onPrimary,
+                        fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(MiuixTheme.colorScheme.primary)
+                            .padding(horizontal = 5.dp, vertical = 1.dp)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                }
+                Text(name, color = MiuixTheme.colorScheme.onBackground, fontWeight = FontWeight.Medium)
+            }
             Spacer(Modifier.height(3.dp))
             Text(path, color = MiuixTheme.colorScheme.onSurfaceVariantSummary, fontSize = MiuixTheme.textStyles.body2.fontSize)
             Spacer(Modifier.height(6.dp))

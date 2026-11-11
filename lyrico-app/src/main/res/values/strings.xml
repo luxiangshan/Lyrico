@@ -5,7 +5,7 @@
     <string name="language_simplified_chinese" translatable="false">简体中文</string>
     <string name="language_traditional_chinese_taiwan" translatable="false">繁體中文（台灣）</string>
     <string name="language_traditional_chinese_hong_kong" translatable="false">繁體中文（香港）</string>
-    <string name="app_name" translatable="false">Lyrico</string>
+    <string name="app_name" translatable="false">Lyrico Mod</string>
     <string name="search_settings">Search Settings</string>
     <string name="plugin_manager_title">Plugin Manager</string>
     <string name="search_source_priority_tip">Each tab keeps its own enabled plugins and order. Metadata sources are shared by Main Search and batch metadata matching</string>

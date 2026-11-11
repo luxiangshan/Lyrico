@@ -41,6 +41,51 @@ class LibraryFolderRepository(
         }
     }
 
+    /**
+     * Lyrico Mod: registers a remote root folder (`remote://<configId>/path`). Remote rows are not SAF
+     * folders: no tree uri, no persisted permission.
+     */
+    suspend fun registerRemote(displayPath: String): Long = operationLock.withLock {
+        withContext(Dispatchers.IO) {
+            database.withTransaction {
+                val registeredId = folders.upsertAndGetId(
+                    path = displayPath,
+                    treeUri = null,
+                    addedBySaf = false,
+                    collapseToExistingParent = true
+                )
+                folders.setIgnored(registeredId, false)
+                indexes.refreshAndPruneIndexes()
+                registeredId
+            }
+        }
+    }
+
+    /** Lyrico Mod: removes remote folder rows (and their songs, via FK cascade) whose path is in [displayPaths] or below. */
+    suspend fun removeRemoteFolders(displayPaths: Collection<String>) = operationLock.withLock {
+        withContext(Dispatchers.IO) {
+            if (displayPaths.isEmpty()) return@withContext Unit
+            database.withTransaction {
+                val roots = displayPaths.map { it.trimEnd('/') }
+                val all = folders.getAllFoldersOnce()
+                val ids = all.filter { folder ->
+                    val path = folder.path.trimEnd('/')
+                    roots.any { root -> path == root || path.startsWith("$root/") }
+                }.map { it.id }
+                if (ids.isNotEmpty()) {
+                    val uris = database.songDao().getAllSyncInfo().filter { it.folderId in ids }.map { it.uri }
+                    if (uris.isNotEmpty()) {
+                        database.songDao().deleteLyricFtsByUris(uris)
+                        uris.chunked(50).forEach { database.songDao().deleteByUris(it) }
+                    }
+                    folders.deleteFoldersPermanently(ids)
+                }
+                indexes.refreshAndPruneIndexes()
+                Unit
+            }
+        }
+    }
+
     suspend fun remove(folderId: Long) = operationLock.withLock {
         withContext(Dispatchers.IO) {
             val removed = database.withTransaction {

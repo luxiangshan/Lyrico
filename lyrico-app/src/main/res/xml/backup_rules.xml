@@ -10,4 +10,6 @@
    <include domain="sharedpref" path="."/>
    <exclude domain="sharedpref" path="device.xml"/>
 -->
+    <!-- Lyrico Mod：远程位置密钥由 Android Keystore 加密，无法跨设备恢复 -->
+    <exclude domain="sharedpref" path="remote_secrets.xml"/>
 </full-backup-content>

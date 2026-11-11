@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Lyrico Mod：遠端存储（WebDAV / OpenList / SMB / 115） -->
+<resources>
+    <string name="remote_add_folder">新增資料夾</string>
+    <string name="remote_add_local_folder">本地資料夾</string>
+    <string name="remote_type_115">115網盤</string>
+    <string name="remote_add_title">新增 %1$s</string>
+    <string name="remote_edit_title">編輯 %1$s</string>
+    <string name="remote_field_name">名稱</string>
+    <string name="remote_field_url_webdav">伺服器位址（如 https://host:port/dav）</string>
+    <string name="remote_field_url_openlist">伺服器位址（如 http://host:5244）</string>
+    <string name="remote_field_host_smb">主機（如 192.168.1.10 或 nas.local:445）</string>
+    <string name="remote_field_share">共用名稱</string>
+    <string name="remote_field_username">使用者名稱</string>
+    <string name="remote_field_username_openlist">使用者名稱（留空為訪客）</string>
+    <string name="remote_field_password">密碼</string>
+    <string name="remote_field_password_keep">密碼（留空則不修改）</string>
+    <string name="remote_field_domain">網域（選填）</string>
+    <string name="remote_connect">連線并選擇資料夾</string>
+    <string name="remote_connecting">正在連線…</string>
+    <string name="remote_missing_fields">請填寫必填項目</string>
+    <string name="remote_no_folder_selected">請至少選擇一個資料夾</string>
+    <string name="remote_browse_selected">已選擇 %1$d 個資料夾</string>
+    <string name="remote_browse_up">上一層</string>
+    <string name="remote_browse_select_current">選擇目前資料夾</string>
+    <string name="remote_browse_empty">此資料夾下沒有子資料夾</string>
+    <string name="remote_browse_loading">載入中…</string>
+    <string name="remote_save">儲存</string>
+    <string name="remote_saved">已儲存，開始掃描</string>
+    <string name="remote_back_to_settings">連線設定</string>
+    <string name="remote_qr_hint">使用 115 App 掃描QR 碼登入</string>
+    <string name="remote_qr_waiting">等待掃碼</string>
+    <string name="remote_qr_scanned">已掃碼，請在手機上確認</string>
+    <string name="remote_qr_confirmed">已確認，正在登入…</string>
+    <string name="remote_qr_expired">QR 碼已過期</string>
+    <string name="remote_qr_cancelled">已取消登入</string>
+    <string name="remote_qr_refresh">重新整理QR 碼</string>
+    <string name="remote_qr_use_saved">使用已儲存的登入</string>
+    <string name="remote_qr_saved_hint">已登入。如需更換帳號，請重新掃碼。</string>
+    <string name="remote_action_rescan">重新掃描</string>
+    <string name="remote_action_edit">編輯</string>
+    <string name="remote_action_delete">刪除</string>
+    <string name="remote_action_retry_upload">重試上傳（%1$d）</string>
+    <string name="remote_delete_title">刪除遠端資料夾</string>
+    <string name="remote_delete_content">僅從曲庫中移除，不會刪除遠端伺服器上的檔案。若這是該位置的最後一個資料夾，該位置及其登入資訊也會一併刪除。</string>
+    <string name="remote_upload_failed">已寫入本機快取，但上傳到遠端失敗：%1$s。請再次儲存，或在“資料夾管理”中重試上傳。</string>
+    <string name="remote_retry_upload_success">已上傳 %1$d 個檔案</string>
+    <string name="remote_retry_upload_failed">上傳失敗：%1$s</string>
+</resources>
