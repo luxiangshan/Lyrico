@@ -48,7 +48,7 @@ internal object Cloud115Const {
     /** UA OpenList's 115 driver uses for every API call (proapi rejects plain browser UAs). */
     const val UA = "Mozilla/5.0 115Browser/$APP_VER"
     const val OSS_UA = "aliyun-sdk-android/2.9.1"
-    const val AUTH_EXPIRED_MSG = "115 登录已失效，请重新扫码"
+    const val AUTH_EXPIRED_MSG = "115 登录已失效，请重新登录"
 
     /** 115driver error.go: 99/990001 not login; 40101035 kicked out; 40101037 session exited. */
     val AUTH_CODES = setOf(99L, 990001L, 990002L, 40101035L, 40101037L, 40101032L)
@@ -171,13 +171,19 @@ data class Cloud115Credential(val uid: String, val cid: String, val seid: String
     val userId: String get() = uid.substringBefore('_')
 
     companion object {
-        /** Tolerant parse (115driver Credential.FromCookie); returns null if UID/CID/SEID missing. */
+        /**
+         * Tolerant parse (115driver Credential.FromCookie); returns null if UID/CID/SEID missing.
+         * KID is optional (web-login sessions may not carry it). Accepts a leading `Cookie:` header
+         * name, line breaks and quoted values, as pasted from a browser.
+         */
         fun parse(cookie: String): Cloud115Credential? {
             val map = HashMap<String, String>()
-            for (item in cookie.split(';')) {
+            val text = cookie.trim().let { if (it.startsWith("cookie:", ignoreCase = true)) it.substring(7) else it }
+            for (item in text.split(';', '\n', '\r')) {
                 val idx = item.indexOf('=')
                 if (idx <= 0) continue
-                map[item.substring(0, idx).trim().uppercase()] = item.substring(idx + 1).trim()
+                val value = item.substring(idx + 1).trim().removeSurrounding("\"")
+                map[item.substring(0, idx).trim().uppercase()] = value
             }
             val uid = map["UID"].orEmpty()
             val cid = map["CID"].orEmpty()

@@ -54,6 +54,14 @@ class Cloud115HashTest {
         assertEquals("123", c.userId)
         assertNull(Cloud115Credential.parse("UID=1; CID=2"))
     }
+
+    @Test fun credentialParsingPastedAndWebSession() {
+        // Pasted from browser dev tools: header name, line breaks, quotes, extra cookies.
+        val pasted = "Cookie: USERSESSIONID=x; UID=\"9_A1_1\";\nCID=c\r\nSEID=s; acw_tc=zz"
+        assertEquals("UID=9_A1_1; CID=c; SEID=s", Cloud115Credential.parse(pasted)!!.toCookie())
+        // Web-login session without KID is accepted.
+        assertEquals("", Cloud115Credential.parse("UID=1_A1_2; CID=c; SEID=s")!!.kid)
+    }
 }
 
 class Cloud115QrLoginTest {

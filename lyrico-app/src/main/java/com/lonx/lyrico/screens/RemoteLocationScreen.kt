@@ -23,7 +23,9 @@ import androidx.compose.foundation.text.input.OutputTransformation
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -43,7 +45,10 @@ import androidx.compose.ui.unit.dp
 import com.lonx.lyrico.R
 import com.lonx.lyrico.data.model.UiEngine
 import com.lonx.lyrico.remote.RemoteType
+import com.lonx.lyrico.remote.integration.Cloud115LoginMethod
+import com.lonx.lyrico.remote.integration.Cloud115WebCookies
 import com.lonx.lyrico.remote.integration.QrCodeBitmap
+import com.lonx.lyrico.remote.integration.QrImageExport
 import com.lonx.lyrico.remote.integration.QrLoginState
 import com.lonx.lyrico.remote.integration.RemoteEditorStep
 import com.lonx.lyrico.remote.integration.RemoteFolderInfo
@@ -58,6 +63,10 @@ import com.lonx.lyrico.ui.theme.LocalUiEngine
 import com.ramcosta.composedestinations.annotation.Destination
 import com.ramcosta.composedestinations.annotation.RootGraph
 import com.ramcosta.composedestinations.navigation.DestinationsNavigator
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.koin.androidx.compose.koinViewModel
 import top.yukonga.miuix.kmp.basic.ButtonDefaults
 import top.yukonga.miuix.kmp.basic.Card
@@ -65,6 +74,7 @@ import top.yukonga.miuix.kmp.basic.Icon
 import top.yukonga.miuix.kmp.basic.IconButton
 import top.yukonga.miuix.kmp.basic.MiuixScrollBehavior
 import top.yukonga.miuix.kmp.basic.SmallTopAppBar
+import top.yukonga.miuix.kmp.basic.TabRowWithContour
 import top.yukonga.miuix.kmp.basic.Text
 import top.yukonga.miuix.kmp.basic.TextButton
 import top.yukonga.miuix.kmp.basic.TextField
@@ -111,17 +121,38 @@ fun RemoteLocationScreen(
     val missingFields = stringResource(R.string.remote_missing_fields)
     val noFolder = stringResource(R.string.remote_no_folder_selected)
     val inBrowser = uiState.step == RemoteEditorStep.BROWSE
+    val inWebLogin = uiState.step == RemoteEditorStep.WEB_LOGIN
+    /** Bumped by the top-bar action to reload the 115 web login page. */
+    var webReloadTick by remember { mutableStateOf(0) }
 
     val onBack: () -> Unit = {
-        if (inBrowser) viewModel.backToForm() else navigator.navigateUp()
+        when {
+            inBrowser -> viewModel.backToForm()
+            inWebLogin -> viewModel.cancelWebLogin()
+            else -> navigator.navigateUp()
+        }
     }
-    BackHandler(enabled = inBrowser) { viewModel.backToForm() }
+    BackHandler(enabled = inBrowser || inWebLogin) { onBack() }
 
     val primaryAction: () -> Unit = {
-        if (inBrowser) viewModel.save(noFolder) else viewModel.connect(missingFields)
+        when {
+            inBrowser -> viewModel.save(noFolder)
+            inWebLogin -> webReloadTick++
+            else -> viewModel.connect(missingFields)
+        }
     }
-    val primaryIcon = if (inBrowser) LucideIcons.Check else LucideIcons.ArrowRight
-    val primaryLabel = stringResource(if (inBrowser) R.string.remote_save else R.string.remote_connect)
+    val primaryIcon = when {
+        inBrowser -> LucideIcons.Check
+        inWebLogin -> LucideIcons.RefreshCw
+        else -> LucideIcons.ArrowRight
+    }
+    val primaryLabel = stringResource(
+        when {
+            inBrowser -> R.string.remote_save
+            inWebLogin -> R.string.remote_115_web_reload
+            else -> R.string.remote_connect
+        }
+    )
 
     LibraryDetailPage(
         title = title,
@@ -146,6 +177,17 @@ fun RemoteLocationScreen(
             )
         }
     ) { paddingValues ->
+        if (uiState.loaded && inWebLogin) {
+            Cloud115WebLoginPane(
+                state = uiState,
+                viewModel = viewModel,
+                reloadTick = webReloadTick,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(com.lonx.lyrico.ui.components.scaffoldContentPadding(paddingValues, bottomExtra = 0.dp)),
+            )
+            return@LibraryDetailPage
+        }
         Column(
             modifier = (if (salt) Modifier else Modifier.nestedScroll(scrollBehavior.nestedScrollConnection))
                 .fillMaxSize()
@@ -208,9 +250,13 @@ private fun RemoteConnectionForm(
                     RemotePasswordField(state, viewModel)
                     RemoteTextField(state.domain, viewModel::onDomainChange, stringResource(R.string.remote_field_domain))
                 }
-                RemoteType.CLOUD115 -> Cloud115QrPanel(state, viewModel)
+                RemoteType.CLOUD115 -> Cloud115LoginPanel(state, viewModel)
             }
         }
+    }
+
+    if (state.type == RemoteType.CLOUD115) {
+        Cloud115ManualCookieCard(state, viewModel)
     }
 
     if (state.type != RemoteType.CLOUD115 || state.hasStoredSecret || state.newCookie != null) {
@@ -235,6 +281,11 @@ private fun RemoteConnectionForm(
 
 @Composable
 private fun Cloud115QrPanel(state: RemoteLocationUiState, viewModel: RemoteLocationViewModel) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val savedMsg = stringResource(R.string.remote_qr_saved_to_album)
+    val failedMsg = stringResource(R.string.remote_qr_export_failed)
+    val shareTitle = stringResource(R.string.remote_qr_share)
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -290,11 +341,325 @@ private fun Cloud115QrPanel(state: RemoteLocationUiState, viewModel: RemoteLocat
             )
         }
         Spacer(Modifier.height(8.dp))
+        val content = state.qrContent
+        val qrUsable = content != null &&
+            state.qrState != QrLoginState.EXPIRED && state.qrState != QrLoginState.CANCELLED
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            TextButton(
+                text = stringResource(R.string.remote_qr_save),
+                onClick = { if (content != null) saveQr(context, scope, content, savedMsg, failedMsg, shareTitle) },
+                enabled = qrUsable,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(
+                text = stringResource(R.string.remote_qr_share),
+                onClick = { if (content != null) shareQr(context, scope, content, failedMsg, shareTitle) },
+                enabled = qrUsable,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = stringResource(R.string.remote_qr_album_hint),
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+        )
+        Spacer(Modifier.height(8.dp))
         TextButton(
             text = stringResource(R.string.remote_qr_refresh),
             onClick = viewModel::startQrLogin,
             enabled = !state.busy,
             modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+private fun saveQr(
+    context: android.content.Context,
+    scope: kotlinx.coroutines.CoroutineScope,
+    content: String,
+    savedMsg: String,
+    failedMsg: String,
+    shareTitle: String,
+) {
+    if (!QrImageExport.canSaveWithoutPermission) {
+        // Android 9: saving to the album would need WRITE_EXTERNAL_STORAGE; offer the share sheet instead
+        // (it includes "save to gallery"/file-manager targets on most phones).
+        Toast.makeText(context, context.getString(R.string.remote_qr_save_fallback), Toast.LENGTH_SHORT).show()
+        shareQr(context, scope, content, failedMsg, shareTitle)
+        return
+    }
+    scope.launch {
+        val result = withContext(Dispatchers.IO) { runCatching { QrImageExport.saveToGallery(context, content) } }
+        val msg = result.fold({ savedMsg }, { failedMsg.format(it.message ?: it::class.java.simpleName) })
+        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+    }
+}
+
+private fun shareQr(
+    context: android.content.Context,
+    scope: kotlinx.coroutines.CoroutineScope,
+    content: String,
+    failedMsg: String,
+    shareTitle: String,
+) {
+    scope.launch {
+        val result = withContext(Dispatchers.IO) {
+            runCatching { QrImageExport.shareIntent(context, content, shareTitle) }
+        }
+        result.fold(
+            onSuccess = { intent ->
+                runCatching { context.startActivity(intent) }.onFailure {
+                    Toast.makeText(context, failedMsg.format(it.message ?: ""), Toast.LENGTH_SHORT).show()
+                }
+            },
+            onFailure = {
+                Toast.makeText(context, failedMsg.format(it.message ?: it::class.java.simpleName), Toast.LENGTH_SHORT).show()
+            }
+        )
+    }
+}
+
+/** 115 sign-in: tabs for 账号密码登录 (web page in a WebView, default) and 扫码登录. */
+@Composable
+private fun Cloud115LoginPanel(state: RemoteLocationUiState, viewModel: RemoteLocationViewModel) {
+    val methods = listOf(Cloud115LoginMethod.WEB, Cloud115LoginMethod.QR)
+    val labels = listOf(
+        stringResource(R.string.remote_115_method_web),
+        stringResource(R.string.remote_115_method_qr),
+    )
+    TabRowWithContour(
+        tabs = labels,
+        selectedTabIndex = methods.indexOf(state.cloud115Method).coerceAtLeast(0),
+        onTabSelected = { index -> viewModel.selectCloud115Method(methods[index]) },
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+    )
+    when (state.cloud115Method) {
+        Cloud115LoginMethod.WEB -> Cloud115WebPanel(state, viewModel)
+        Cloud115LoginMethod.QR -> Cloud115QrPanel(state, viewModel)
+    }
+}
+
+@Composable
+private fun Cloud115WebPanel(state: RemoteLocationUiState, viewModel: RemoteLocationViewModel) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+    ) {
+        if (state.isEditing && state.hasStoredSecret && state.newCookie == null) {
+            Text(
+                text = stringResource(R.string.remote_qr_saved_hint),
+                color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                fontSize = MiuixTheme.textStyles.body2.fontSize
+            )
+            Spacer(Modifier.height(8.dp))
+        }
+        if (state.newCookie != null) {
+            Text(
+                text = stringResource(R.string.remote_115_signed_in),
+                color = MiuixTheme.colorScheme.primary,
+                fontWeight = FontWeight.Medium,
+            )
+            Spacer(Modifier.height(8.dp))
+        }
+        Text(
+            text = stringResource(R.string.remote_115_web_hint),
+            color = MiuixTheme.colorScheme.onBackground,
+        )
+        Spacer(Modifier.height(6.dp))
+        Text(
+            text = stringResource(R.string.remote_115_web_slot_note),
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            fontSize = MiuixTheme.textStyles.body2.fontSize,
+        )
+        Spacer(Modifier.height(8.dp))
+        TextButton(
+            text = stringResource(R.string.remote_115_web_open),
+            onClick = viewModel::startWebLogin,
+            enabled = !state.busy,
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.textButtonColorsPrimary(),
+        )
+    }
+}
+
+/** Advanced, collapsed: paste a 115 cookie string (UID/CID/SEID[/KID]). */
+@Composable
+private fun Cloud115ManualCookieCard(state: RemoteLocationUiState, viewModel: RemoteLocationViewModel) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    val invalid = stringResource(R.string.remote_115_cookie_invalid)
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+    ) {
+        Column(modifier = Modifier.padding(vertical = 4.dp)) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { expanded = !expanded }
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = stringResource(R.string.remote_115_cookie_title),
+                    color = MiuixTheme.colorScheme.onBackground,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    text = if (expanded) "▲" else "▼",
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                )
+            }
+            if (expanded) {
+                Text(
+                    text = stringResource(R.string.remote_115_cookie_hint),
+                    color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+                    fontSize = MiuixTheme.textStyles.body2.fontSize,
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                )
+                val inputState = rememberEditorTextFieldState(state.manualCookie, viewModel::onManualCookieChange)
+                TextField(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
+                    state = inputState,
+                    label = stringResource(R.string.remote_115_cookie_field),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Ascii),
+                    lineLimits = TextFieldLineLimits.MultiLine(minHeightInLines = 3, maxHeightInLines = 6),
+                )
+                TextButton(
+                    text = stringResource(if (state.busy) R.string.remote_connecting else R.string.remote_115_cookie_connect),
+                    onClick = { viewModel.connectWithManualCookie(invalid) },
+                    enabled = !state.busy && state.manualCookie.isNotBlank(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 4.dp),
+                    colors = ButtonDefaults.textButtonColorsPrimary(),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 115's official web login page in a WebView. 115 handles password, captcha and SMS/2FA itself; we only
+ * watch the WebView cookie jar for UID/CID/SEID(/KID). The 115 cookies are cleared from the WebView before
+ * the page loads and when this pane leaves composition (after capture or on cancel).
+ */
+@android.annotation.SuppressLint("SetJavaScriptEnabled")
+@Composable
+private fun Cloud115WebLoginPane(
+    state: RemoteLocationUiState,
+    viewModel: RemoteLocationViewModel,
+    reloadTick: Int,
+    modifier: Modifier = Modifier,
+) {
+    val cookieManager = remember { android.webkit.CookieManager.getInstance() }
+    var webView by remember { mutableStateOf<android.webkit.WebView?>(null) }
+    var progress by remember { mutableStateOf(0) }
+
+    // Poll the cookie jar: login completes inside 115's own JS/XHR, not always with a navigation.
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1_200)
+            Cloud115WebCookies.readSession(cookieManager)?.let(viewModel::onWebSessionCookie)
+        }
+    }
+    LaunchedEffect(reloadTick) {
+        if (reloadTick > 0) webView?.reload()
+    }
+    DisposableEffect(Unit) {
+        onDispose {
+            webView?.let { view ->
+                runCatching {
+                    view.stopLoading()
+                    view.loadUrl("about:blank")
+                    view.clearHistory()
+                    view.clearCache(false)
+                    view.destroy()
+                }
+            }
+            webView = null
+            Cloud115WebCookies.clear(cookieManager)
+        }
+    }
+
+    Column(modifier = modifier) {
+        Text(
+            text = stringResource(R.string.remote_115_web_slot_note),
+            color = MiuixTheme.colorScheme.onSurfaceVariantSummary,
+            fontSize = MiuixTheme.textStyles.footnote1.fontSize,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+        )
+        val status = when {
+            state.webChecking -> stringResource(R.string.remote_115_web_checking)
+            state.webError != null -> stringResource(R.string.remote_115_web_check_failed, state.webError)
+            else -> null
+        }
+        status?.let {
+            Text(
+                text = it,
+                color = if (state.webError != null && !state.webChecking) MiuixTheme.colorScheme.error else MiuixTheme.colorScheme.primary,
+                fontSize = MiuixTheme.textStyles.body2.fontSize,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            )
+        }
+        if (progress in 1..99) {
+            androidx.compose.material3.LinearProgressIndicator(
+                progress = { progress / 100f },
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        androidx.compose.ui.viewinterop.AndroidView(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f),
+            factory = { ctx ->
+                android.webkit.WebView(ctx).apply {
+                    layoutParams = android.view.ViewGroup.LayoutParams(
+                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                        android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                    )
+                    settings.javaScriptEnabled = true
+                    settings.domStorageEnabled = true
+                    settings.javaScriptCanOpenWindowsAutomatically = true
+                    settings.userAgentString = Cloud115WebCookies.DESKTOP_UA
+                    settings.useWideViewPort = true
+                    settings.loadWithOverviewMode = true
+                    settings.setSupportZoom(true)
+                    settings.builtInZoomControls = true
+                    settings.displayZoomControls = false
+                    cookieManager.setAcceptCookie(true)
+                    cookieManager.setAcceptThirdPartyCookies(this, true)
+                    webChromeClient = object : android.webkit.WebChromeClient() {
+                        override fun onProgressChanged(view: android.webkit.WebView?, newProgress: Int) {
+                            progress = newProgress
+                        }
+                    }
+                    webViewClient = object : android.webkit.WebViewClient() {
+                        override fun shouldOverrideUrlLoading(
+                            view: android.webkit.WebView?,
+                            request: android.webkit.WebResourceRequest?,
+                        ): Boolean {
+                            val scheme = request?.url?.scheme?.lowercase()
+                            // Keep http(s) inside the WebView; ignore app deep links (e.g. 115://).
+                            return scheme != "http" && scheme != "https"
+                        }
+
+                        override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
+                            Cloud115WebCookies.readSession(cookieManager)?.let(viewModel::onWebSessionCookie)
+                        }
+                    }
+                    // Start from a clean 115 session so a stale cookie is never captured.
+                    Cloud115WebCookies.clear(cookieManager)
+                    loadUrl(Cloud115WebCookies.LOGIN_URL)
+                    webView = this
+                }
+            },
         )
     }
 }

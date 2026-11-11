@@ -17,7 +17,10 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-enum class RemoteEditorStep { FORM, BROWSE }
+enum class RemoteEditorStep { FORM, WEB_LOGIN, BROWSE }
+
+/** How a 115 location signs in (tabs). WEB = 115's own web login page (account/password) in a WebView. The manual cookie field is a collapsed extra below the tabs. */
+enum class Cloud115LoginMethod { WEB, QR }
 
 data class RemoteLocationUiState(
     val loaded: Boolean = false,
@@ -45,6 +48,13 @@ data class RemoteLocationUiState(
     val qrState: QrLoginState? = null,
     /** Cookie obtained from a fresh QR login (replaces the stored one on save). */
     val newCookie: String? = null,
+    // 115 login method + web / manual-cookie login
+    val cloud115Method: Cloud115LoginMethod = Cloud115LoginMethod.WEB,
+    /** Web login: the captured cookie is being verified. */
+    val webChecking: Boolean = false,
+    /** Web login: last verification failure (the page stays open). */
+    val webError: String? = null,
+    val manualCookie: String = "",
     val saved: Boolean = false,
 )
 
@@ -58,6 +68,9 @@ class RemoteLocationViewModel(
 
     private var storage: RemoteStorage? = null
     private var qrJob: Job? = null
+    private var webCheckJob: Job? = null
+    /** Web login cookies already verified (and rejected), so the poller does not retry the same ones. */
+    private var lastWebCookieTried: String? = null
 
     fun load(type: RemoteType, configId: String) {
         if (_uiState.value.loaded) return
@@ -85,7 +98,6 @@ class RemoteLocationViewModel(
                     configId = RemoteConfigRepository.newId(),
                     name = RemoteFolderInfo.badgeOf(type),
                 )
-                if (type == RemoteType.CLOUD115) startQrLogin()
             }
         }
     }
@@ -182,6 +194,90 @@ class RemoteLocationViewModel(
         }
     }
 
+    // ---------------- 115 login method ----------------
+
+    fun selectCloud115Method(method: Cloud115LoginMethod) {
+        val state = _uiState.value
+        if (state.cloud115Method == method) return
+        _uiState.update { it.copy(cloud115Method = method, error = null) }
+        if (method == Cloud115LoginMethod.QR) {
+            if (state.qrContent == null || state.qrState == QrLoginState.EXPIRED || qrJob?.isActive != true) startQrLogin()
+        } else {
+            // Stop polling so a QR confirmed later cannot race another login.
+            qrJob?.cancel()
+            qrJob = null
+            _uiState.update { it.copy(qrContent = null, qrState = null) }
+        }
+    }
+
+    // ---------------- 115 web (account/password) login ----------------
+
+    /** Opens 115's web login page (in-app WebView). */
+    fun startWebLogin() {
+        if (_uiState.value.busy) return
+        qrJob?.cancel()
+        webCheckJob?.cancel()
+        lastWebCookieTried = null
+        _uiState.update {
+            it.copy(step = RemoteEditorStep.WEB_LOGIN, webChecking = false, webError = null, error = null)
+        }
+    }
+
+    fun cancelWebLogin() {
+        webCheckJob?.cancel()
+        _uiState.update { it.copy(step = RemoteEditorStep.FORM, webChecking = false) }
+    }
+
+    /**
+     * Called by the WebView screen whenever it sees a complete 115 session cookie (UID+CID+SEID).
+     * Verifies it with [RemoteStorage.testConnection]; on success the cookie becomes the new secret and
+     * the folder browser opens, exactly like after a QR login.
+     */
+    fun onWebSessionCookie(cookie: String) {
+        val state = _uiState.value
+        if (state.step != RemoteEditorStep.WEB_LOGIN || state.webChecking) return
+        if (cookie == lastWebCookieTried) return
+        lastWebCookieTried = cookie
+        webCheckJob = viewModelScope.launch {
+            _uiState.update { it.copy(webChecking = true, webError = null) }
+            try {
+                closeStorage()
+                val connected = service.connect(buildConfig(_uiState.value).copy(secret = cookie))
+                storage = connected
+                _uiState.update {
+                    it.copy(
+                        webChecking = false,
+                        newCookie = cookie,
+                        step = RemoteEditorStep.BROWSE,
+                        error = null,
+                    )
+                }
+                browse("/")
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                _uiState.update { it.copy(webChecking = false, webError = e.message ?: e::class.java.simpleName) }
+            }
+        }
+    }
+
+    // ---------------- 115 manual cookie ----------------
+
+    fun onManualCookieChange(value: String) = _uiState.update { it.copy(manualCookie = value, error = null) }
+
+    /** Validates the pasted cookie (UID, CID, SEID required) and connects with it. */
+    fun connectWithManualCookie(invalidMessage: String) {
+        val state = _uiState.value
+        if (state.busy) return
+        val cookie = com.lonx.lyrico.remote.cloud115.Cloud115Credential.parse(state.manualCookie)?.toCookie()
+        if (cookie == null) {
+            _uiState.update { it.copy(error = invalidMessage) }
+            return
+        }
+        qrJob?.cancel()
+        _uiState.update { it.copy(newCookie = cookie) }
+        connect(missingFieldMessage = invalidMessage)
+    }
+
     // ---------------- 115 QR login ----------------
 
     fun startQrLogin() {
@@ -255,6 +351,7 @@ class RemoteLocationViewModel(
 
     override fun onCleared() {
         qrJob?.cancel()
+        webCheckJob?.cancel()
         closeStorage()
         super.onCleared()
     }

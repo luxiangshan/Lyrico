@@ -23,7 +23,8 @@ import java.util.TimeZone
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * 115 cloud storage using the web cookie from [Cloud115QrLogin] (`config.secret`).
+ * 115 cloud storage using a 115 session cookie (`config.secret`): from [Cloud115QrLogin], the in-app web
+ * (account/password) login, or pasted manually. UID, CID and SEID are required; KID is optional.
  *
  * Protocol follows SheltonZhu/115driver (used by OpenList's 115 driver):
  *  - listing: `webapi.115.com/files` (paged), path -> cid resolved by walking folders, cached
@@ -33,7 +34,7 @@ import java.util.concurrent.ConcurrentHashMap
  *    (simple PUT, multipart above 100 MiB) with 115's callback. 115 has no overwrite, so the new file is
  *    uploaded under a temporary name, then the old file is deleted (to recycle bin) and the new one renamed.
  *  - rename `files/batch_rename`, delete `rb/delete`.
- * Cookie expiry -> [RemoteAuthException] ("115 登录已失效，请重新扫码").
+ * Cookie expiry -> [RemoteAuthException] ("115 登录已失效，请重新登录").
  */
 class Cloud115Storage(
     override val config: RemoteConfig,
@@ -77,7 +78,7 @@ class Cloud115Storage(
     internal var cipherFactory: () -> Ec115Cipher = { Ec115Cipher.create() }
 
     private fun requireCredential() {
-        if (credential == null) throw RemoteAuthException("115 未登录或 Cookie 不完整，请重新扫码")
+        if (credential == null) throw RemoteAuthException("115 未登录或 Cookie 不完整（需要 UID、CID、SEID），请重新登录")
     }
 
     // ---------------------------------------------------------------- RemoteStorage

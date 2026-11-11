@@ -39,7 +39,7 @@
     <string name="remote_qr_cancelled">Sign-in cancelled</string>
     <string name="remote_qr_refresh">Refresh QR code</string>
     <string name="remote_qr_use_saved">Use saved sign-in</string>
-    <string name="remote_qr_saved_hint">Already signed in. Scan again to switch account.</string>
+    <string name="remote_qr_saved_hint">Already signed in. Sign in again below to switch account.</string>
     <string name="remote_action_rescan">Rescan</string>
     <string name="remote_action_edit">Edit</string>
     <string name="remote_action_delete">Delete</string>
@@ -49,4 +49,24 @@
     <string name="remote_upload_failed">Saved to the local cache, but uploading to the remote location failed: %1$s. Save again or retry the upload from Folder Manager.</string>
     <string name="remote_retry_upload_success">Uploaded %1$d file(s)</string>
     <string name="remote_retry_upload_failed">Upload failed: %1$s</string>
+    <string name="remote_115_method_web">Account &amp; password</string>
+    <string name="remote_115_method_qr">Scan QR code</string>
+    <string name="remote_115_web_hint">Sign in on 115\'s official web page with your account and password. Captcha and SMS verification are handled by 115\'s page.</string>
+    <string name="remote_115_web_slot_note">Web sign-in uses 115\'s \"web\" login slot and may sign out 115 in other browsers.</string>
+    <string name="remote_115_web_open">Open 115 sign-in page</string>
+    <string name="remote_115_web_reload">Reload page</string>
+    <string name="remote_115_web_checking">Signed in, verifying…</string>
+    <string name="remote_115_web_check_failed">Verification failed: %1$s. Finish signing in on the page or try again.</string>
+    <string name="remote_115_signed_in">Signed in. Tap \"Connect and choose folders\" to continue.</string>
+    <string name="remote_qr_save">Save QR to album</string>
+    <string name="remote_qr_share">Share QR code</string>
+    <string name="remote_qr_saved_to_album">Saved to Pictures/LyricoMod</string>
+    <string name="remote_qr_export_failed">Could not export the QR code: %1$s</string>
+    <string name="remote_qr_save_fallback">Saving to the album needs Android 10+; opening the share sheet instead</string>
+    <string name="remote_qr_album_hint">Scanning on the same phone? Save or share the QR code, then in the 115 app use Scan → pick from album, or scan it with another phone. The code expires after a few minutes.</string>
+    <string name="remote_115_cookie_title">Enter cookie manually (advanced)</string>
+    <string name="remote_115_cookie_hint">Paste a 115 cookie, e.g. UID=…; CID=…; SEID=…; KID=… (KID optional).</string>
+    <string name="remote_115_cookie_field">Cookie</string>
+    <string name="remote_115_cookie_connect">Verify and continue</string>
+    <string name="remote_115_cookie_invalid">Cookie must contain UID, CID and SEID</string>
 </resources>

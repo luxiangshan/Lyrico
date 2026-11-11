@@ -328,7 +328,7 @@ class Cloud115StorageTest {
             storage.list("/")
             throw AssertionError("expected RemoteAuthException")
         } catch (e: RemoteAuthException) {
-            assertEquals("115 登录已失效，请重新扫码", e.message)
+            assertEquals("115 登录已失效，请重新登录", e.message)
         }
         try { storage.testConnection(); throw AssertionError() } catch (_: RemoteAuthException) {}
     }

@@ -36,7 +36,7 @@
     <string name="remote_qr_cancelled">已取消登录</string>
     <string name="remote_qr_refresh">刷新二维码</string>
     <string name="remote_qr_use_saved">使用已保存的登录</string>
-    <string name="remote_qr_saved_hint">已登录。如需更换账号，请重新扫码。</string>
+    <string name="remote_qr_saved_hint">已登录。如需更换账号，请在下方重新登录。</string>
     <string name="remote_action_rescan">重新扫描</string>
     <string name="remote_action_edit">编辑</string>
     <string name="remote_action_delete">删除</string>
@@ -46,4 +46,24 @@
     <string name="remote_upload_failed">已写入本地缓存，但上传到远程失败：%1$s。请再次保存，或在“文件夹管理”中重试上传。</string>
     <string name="remote_retry_upload_success">已上传 %1$d 个文件</string>
     <string name="remote_retry_upload_failed">上传失败：%1$s</string>
+    <string name="remote_115_method_web">账号密码登录</string>
+    <string name="remote_115_method_qr">扫码登录</string>
+    <string name="remote_115_web_hint">在 115 官方网页上用账号和密码登录，验证码、短信验证由 115 页面自行处理。</string>
+    <string name="remote_115_web_slot_note">网页登录会占用 115 的\"网页端\"登录位，可能让其他浏览器里的 115 下线。</string>
+    <string name="remote_115_web_open">打开 115 登录页</string>
+    <string name="remote_115_web_reload">刷新页面</string>
+    <string name="remote_115_web_checking">已登录，正在验证…</string>
+    <string name="remote_115_web_check_failed">验证失败：%1$s。请在页面上完成登录或重试。</string>
+    <string name="remote_115_signed_in">已登录，点击「连接并选择文件夹」继续。</string>
+    <string name="remote_qr_save">保存二维码到相册</string>
+    <string name="remote_qr_share">分享二维码</string>
+    <string name="remote_qr_saved_to_album">已保存到 图片/LyricoMod</string>
+    <string name="remote_qr_export_failed">二维码导出失败：%1$s</string>
+    <string name="remote_qr_save_fallback">保存到相册需要 Android 10 及以上，改为打开分享</string>
+    <string name="remote_qr_album_hint">在同一部手机上？保存或分享二维码后，在 115 App 的扫一扫里从相册选择，或用另一部手机扫码。二维码几分钟后过期。</string>
+    <string name="remote_115_cookie_title">手动填写 Cookie（高级）</string>
+    <string name="remote_115_cookie_hint">粘贴 115 Cookie，如 UID=…; CID=…; SEID=…; KID=…（KID 可省略）。</string>
+    <string name="remote_115_cookie_field">Cookie</string>
+    <string name="remote_115_cookie_connect">验证并继续</string>
+    <string name="remote_115_cookie_invalid">Cookie 需包含 UID、CID 和 SEID</string>
 </resources>

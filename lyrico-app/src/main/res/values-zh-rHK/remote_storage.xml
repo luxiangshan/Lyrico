@@ -16,7 +16,7 @@
     <string name="remote_field_password">密碼</string>
     <string name="remote_field_password_keep">密碼（留空則不修改）</string>
     <string name="remote_field_domain">網域（選填）</string>
-    <string name="remote_connect">連線并選擇資料夾</string>
+    <string name="remote_connect">連線並選擇資料夾</string>
     <string name="remote_connecting">正在連線…</string>
     <string name="remote_missing_fields">請填寫必填項目</string>
     <string name="remote_no_folder_selected">請至少選擇一個資料夾</string>
@@ -36,7 +36,7 @@
     <string name="remote_qr_cancelled">已取消登入</string>
     <string name="remote_qr_refresh">重新整理QR 碼</string>
     <string name="remote_qr_use_saved">使用已儲存的登入</string>
-    <string name="remote_qr_saved_hint">已登入。如需更換帳號，請重新掃碼。</string>
+    <string name="remote_qr_saved_hint">已登入。如需更換帳號，請在下方重新登入。</string>
     <string name="remote_action_rescan">重新掃描</string>
     <string name="remote_action_edit">編輯</string>
     <string name="remote_action_delete">刪除</string>
@@ -46,4 +46,24 @@
     <string name="remote_upload_failed">已寫入本機快取，但上傳到遠端失敗：%1$s。請再次儲存，或在“資料夾管理”中重試上傳。</string>
     <string name="remote_retry_upload_success">已上傳 %1$d 個檔案</string>
     <string name="remote_retry_upload_failed">上傳失敗：%1$s</string>
+    <string name="remote_115_method_web">帳號密碼登入</string>
+    <string name="remote_115_method_qr">掃碼登入</string>
+    <string name="remote_115_web_hint">在 115 官方網頁上用帳號和密碼登入，驗證碼、簡訊驗證由 115 頁面自行處理。</string>
+    <string name="remote_115_web_slot_note">網頁登入會佔用 115 的\"網頁端\"登入位，可能讓其他瀏覽器裡的 115 下線。</string>
+    <string name="remote_115_web_open">開啟 115 登入頁</string>
+    <string name="remote_115_web_reload">重新整理頁面</string>
+    <string name="remote_115_web_checking">已登入，正在驗證…</string>
+    <string name="remote_115_web_check_failed">驗證失敗：%1$s。請在頁面上完成登入或重試。</string>
+    <string name="remote_115_signed_in">已登入，點擊「連線並選擇資料夾」繼續。</string>
+    <string name="remote_qr_save">儲存QR 碼到相簿</string>
+    <string name="remote_qr_share">分享QR 碼</string>
+    <string name="remote_qr_saved_to_album">已儲存到 圖片/LyricoMod</string>
+    <string name="remote_qr_export_failed">QR 碼匯出失敗：%1$s</string>
+    <string name="remote_qr_save_fallback">儲存到相簿需要 Android 10 或以上，改為開啟分享</string>
+    <string name="remote_qr_album_hint">在同一部手機上？儲存或分享QR 碼後，在 115 App 的掃一掃裡從相簿選擇，或用另一部手機掃碼。QR 碼幾分鐘後過期。</string>
+    <string name="remote_115_cookie_title">手動填寫 Cookie（進階）</string>
+    <string name="remote_115_cookie_hint">貼上 115 Cookie，如 UID=…; CID=…; SEID=…; KID=…（KID 可省略）。</string>
+    <string name="remote_115_cookie_field">Cookie</string>
+    <string name="remote_115_cookie_connect">驗證並繼續</string>
+    <string name="remote_115_cookie_invalid">Cookie 需包含 UID、CID 和 SEID</string>
 </resources>

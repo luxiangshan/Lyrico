@@ -10,7 +10,11 @@
   - WebDAV：服务器地址（如 `https://host:port/dav`）、用户名、密码
   - OpenList：服务器地址（如 `http://host:5244`）、用户名（留空为游客）、密码
   - SMB：主机（`192.168.1.10` 或 `nas.local:445`）、共享名、用户名、密码、域（可选）
-  - 115网盘：显示二维码，用 115 App 扫码；状态依次显示 等待扫码 / 已扫码 / 已确认 / 已过期，可「刷新二维码」
+  - 115网盘：三种登录方式（标签切换 + 折叠的高级项）：
+    - **账号密码登录**（默认）：「打开 115 登录页」在应用内 WebView 打开 115 官方网页登录页 `https://115.com/?mode=login`（桌面版 Chrome UA，才会显示账号密码表单；启用 JavaScript、DOM Storage，接受第三方 Cookie）。密码、验证码、短信/二次验证均由 115 页面自己处理。应用每 1.2 秒及每次页面加载完成时读取 WebView `CookieManager` 中 `.115.com` 的 UID / CID / SEID（及 KID，如有）；齐全后用 `Cloud115Storage.testConnection` 验证，成功即关闭网页、进入文件夹选择（与扫码登录后相同）；验证失败则留在页面并显示原因。打开前和关闭网页时（无论成功或取消）都会清除 WebView 中 115 相关域名的 Cookie，登录信息只保存在加密存储里。页面上提示：网页登录会占用 115 的"网页端"登录位，可能让其他浏览器里的 115 下线。顶栏按钮可刷新页面，返回键退出网页登录。
+    - **扫码登录**：显示二维码，用 115 App 扫码；状态依次显示 等待扫码 / 已扫码 / 已确认 / 已过期，可「刷新二维码」。新增「保存二维码到相册」（Android 10+ 通过 MediaStore 写入 `图片/LyricoMod`，无需权限；Android 9 改为打开分享）和「分享二维码」（缓存 PNG 经 FileProvider 分享），以便在 115 App 里从相册识别或用另一部手机扫码。切换到其它标签时停止轮询。
+    - **手动填写 Cookie（高级，默认折叠）**：多行输入框，接受 `UID=…; CID=…; SEID=…; KID=…`（可带 `Cookie:` 前缀、换行、引号），必须含 UID、CID、SEID，经 testConnection 验证后进入文件夹选择。
+    - Cookie 校验统一为 UID、CID、SEID 必需，KID 可选（网页登录的会话可能没有 KID）。
 - 密码框默认掩码，可点眼睛图标显示；编辑已有位置时密码留空表示不修改。
 - 连接成功后进入远程文件夹浏览器，可勾选一个或多个文件夹；保存时会再次测试连接。
 - 远程文件夹出现在文件夹列表中，带类型标签（WebDAV / OpenList / SMB / 115）与歌曲数量；菜单提供 **重新扫描 / 编辑 / 删除**（删除只从曲库移除，不删服务器文件；若是该位置最后一个文件夹，位置及登录信息一并删除）。如有上传失败的修改，还会出现 **重试上传（N）**。
@@ -49,7 +53,8 @@
 - 缓存上限 1 GB（LRU 清理，待上传文件不清理），位于应用缓存目录，系统清理缓存后需重新下载。
 - 分享、导出等其它直接依赖 content:// 的功能对远程歌曲可能不可用。
 - 同一文件若在服务器端与本地同时被修改，以本地待上传版本为准（覆盖服务器端）。
-- 115 登录使用 “支付宝小程序” 设备槽（不会挤掉手机 App 的登录）。
+- 115 扫码登录使用 “支付宝小程序” 设备槽（不会挤掉手机 App 的登录）；账号密码（网页）登录使用 115 的“网页端”登录位，会挤掉其他浏览器里的 115 网页登录。
+- 115 网页登录页的地址、表单与登录成功后的 Cookie 由 115 决定，若 115 改版需要调整 `Cloud115WebCookies`（登录地址 / UA / 读取的域名）。
 - 本次修改未在真机上测试。
 
 ## 构建
@@ -62,6 +67,6 @@
 
 ## 主要代码位置
 - `remote/RemoteStorage.kt`：统一接口；`remote/webdav`、`remote/smb`、`remote/cloud115`：各协议实现。
-- `remote/integration/`：配置仓库、加密凭据、存储工厂/管理、缓存与写回、远程扫描、位置服务、编辑界面 ViewModel、115 扫码桥接、二维码生成；部分读取：`RemoteBlockCache.kt`（分块缓存，纯 JVM，有单元测试）、`RemoteProxyFd.kt`、`RemoteReadAccess.kt`、`RemoteCoverCache.kt`。
+- `remote/integration/`：配置仓库、加密凭据、存储工厂/管理、缓存与写回、远程扫描、位置服务、编辑界面 ViewModel、115 扫码桥接、二维码生成、二维码保存/分享（`QrImageExport.kt`）、115 网页登录 Cookie 读取与清除（`Cloud115WebCookies.kt`）；部分读取：`RemoteBlockCache.kt`（分块缓存，纯 JVM，有单元测试）、`RemoteProxyFd.kt`、`RemoteReadAccess.kt`、`RemoteCoverCache.kt`。
 - `screens/RemoteLocationScreen.kt`：添加/编辑远程位置与文件夹选择。
 - 修改：`AudioFileAccess`、`AudioTagRepositoryImpl`（写后上传）、`SongFileRepositoryImpl`（远程重命名/删除）、`LibraryScanRepositoryImpl`（远程扫描）、`FolderManagerScreen` / `FolderManagerViewModel`、`FolderDao`、`LibraryFolderRepository`、`AudioCoverFetcher`、`ReplayGainScanner`、`PlaybackRepositoryImpl`、`AppModule`、Gradle 与 ProGuard 配置。
