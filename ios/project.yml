@@ -1,0 +1,105 @@
+# XcodeGen spec for Lyrico Mod (iOS/iPadOS). Generate with: ios/scripts/generate-project.sh
+# (the script also wires every local package found in ios/Packages/*; see IOS_PORT.md).
+name: LyricoMod
+options:
+  bundleIdPrefix: com.lonx.lyrico
+  deploymentTarget:
+    iOS: "16.0"
+  developmentLanguage: en
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.7.0"
+    CURRENT_PROJECT_VERSION: "1"
+    IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+    CLANG_CXX_LANGUAGE_STANDARD: "c++17"
+    CLANG_ENABLE_OBJC_ARC: YES
+    ENABLE_BITCODE: NO
+    DEAD_CODE_STRIPPING: YES
+
+packages:
+  GRDB:
+    url: https://github.com/groue/GRDB.swift
+    from: "6.29.3"
+  # @OPTIONAL_PACKAGES@
+
+targets:
+  LyricoMod:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: LyricoMod
+        excludes:
+          - "**/*.md"
+    entitlements:
+      path: LyricoMod/LyricoMod.entitlements
+      properties: {}
+    info:
+      path: LyricoMod/Info.plist
+      properties:
+        CFBundleDisplayName: Lyrico Mod
+        CFBundleName: LyricoMod
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        CFBundleDevelopmentRegion: en
+        CFBundleLocalizations: [en, zh-Hans]
+        CFBundleAllowMixedLocalizations: true
+        LSRequiresIPhoneOS: true
+        UILaunchScreen: {}
+        UIApplicationSupportsIndirectInputEvents: true
+        UIRequiresFullScreen: false
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+        UISupportsDocumentBrowser: false
+        ITSAppUsesNonExemptEncryption: false
+        NSPhotoLibraryAddUsageDescription: "Lyrico Mod saves exported cover art to your photo library."
+        NSPhotoLibraryUsageDescription: "Lyrico Mod lets you pick an image from your photo library as cover art."
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Audio
+            CFBundleTypeRole: Editor
+            LSHandlerRank: Alternate
+            LSItemContentTypes:
+              - public.audio
+              - public.mp3
+              - org.xiph.flac
+              - public.mpeg-4-audio
+              - com.apple.m4a-audio
+              - com.microsoft.waveform-audio
+              - public.aiff-audio
+              - org.xiph.ogg-audio
+              - org.xiph.opus
+              - com.microsoft.windows-media-wma
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.lonx.lyrico.mod
+        PRODUCT_NAME: LyricoMod
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SUPPORTS_MACCATALYST: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        SWIFT_OBJC_BRIDGING_HEADER: LyricoMod/AudioTag/Native/LyricoMod-Bridging-Header.h
+        HEADER_SEARCH_PATHS:
+          - "$(SRCROOT)/build/taglib/$(PLATFORM_NAME)/include/taglib"
+        LIBRARY_SEARCH_PATHS:
+          - "$(SRCROOT)/build/taglib/$(PLATFORM_NAME)/lib"
+        OTHER_LDFLAGS: ["$(inherited)", "-ltag", "-lc++"]
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
+        SWIFT_COMPILATION_MODE: wholemodule
+        LOCALIZATION_PREFERS_STRING_CATALOGS: NO
+    dependencies:
+      - package: GRDB
+      # @OPTIONAL_DEPENDENCIES@
+    scheme: {}
