@@ -21,7 +21,7 @@ struct ArtistsView: View {
         .listStyle(.plain)
         .overlay { if model.artists.isEmpty { Text(L("empty_artists_title")).foregroundStyle(.secondary) } }
         .searchable(text: $model.query)
-        .navigationTitle(L("artist_list_title"))
+        .navigationTitle(L("artist_list_title", model.artists.count))
         .toolbar {
             Menu {
                 Picker(L("cd_sort"), selection: $settings.artistSortBy) {
@@ -65,7 +65,7 @@ struct AlbumsView: View {
         }
         .overlay { if model.albums.isEmpty { Text(L("empty_albums_title")).foregroundStyle(.secondary) } }
         .searchable(text: $model.query)
-        .navigationTitle(L("album_list_title"))
+        .navigationTitle(L("album_list_title", model.albums.count))
         .toolbar {
             Menu {
                 Picker(L("cd_sort"), selection: $settings.albumSortBy) {

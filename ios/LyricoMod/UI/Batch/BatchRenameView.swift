@@ -101,12 +101,12 @@ struct BatchRenameView: View {
             if hasConflicts {
                 Section { Text(L("rename_conflict_warning")).foregroundStyle(.orange) }
             }
-            Section(L("preview_title")) {
+            Section(L("preview_title", previews.count)) {
                 ForEach(previews) { p in
                     let song = p.song, name = p.name
                     VStack(alignment: .leading, spacing: 2) {
                         Text(L("label_old_name", song.fileName)).font(.caption).foregroundStyle(.secondary)
-                        Text(L("label_new_name") + ": " + name).font(.callout)
+                        Text(L("label_new_name", name)).font(.callout)
                             .foregroundStyle(name == song.fileName ? Color.secondary : Color.primary)
                     }
                 }

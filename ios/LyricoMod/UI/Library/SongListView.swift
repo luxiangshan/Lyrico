@@ -35,11 +35,11 @@ struct SongListView: View {
 
     private var title: String {
         switch scope {
-        case .all: return L("song_list_title")
+        case .all: return L("song_list_title", model.songs.count)
         case .artist(let n): return n
         case .album(let n): return n.isEmpty ? L("unknown_album") : n
         case .folder(_, let dir): return dir == "/" ? L("folder_tab_folders") : (dir as NSString).lastPathComponent
-        case .ids: return L("song_list_title")
+        case .ids: return L("song_list_title", model.songs.count)
         }
     }
 
@@ -80,7 +80,7 @@ struct SongListView: View {
                 }
             }
             .alert(L("dialog_rename_title"), isPresented: Binding(get: { renameTarget != nil }, set: { if !$0 { renameTarget = nil } })) {
-                TextField(L("label_new_name"), text: $renameText)
+                TextField(L("label_new_name", "").trimmingCharacters(in: CharacterSet(charactersIn: "：: ")), text: $renameText)
                 Button(L("cancel"), role: .cancel) { renameTarget = nil }
                 Button(L("confirm")) {
                     if let song = renameTarget {

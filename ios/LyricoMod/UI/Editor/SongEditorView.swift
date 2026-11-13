@@ -100,7 +100,7 @@ struct TagEditorForm: View {
             }
         }
         .alert(L("dialog_rename_title"), isPresented: $showRename) {
-            TextField(L("label_new_name"), text: $renameText)
+            TextField(L("label_new_name", "").trimmingCharacters(in: CharacterSet(charactersIn: "：: ")), text: $renameText)
             Button(L("cancel"), role: .cancel) {}
             Button(L("confirm")) {
                 guard let song = model.song else { return }
