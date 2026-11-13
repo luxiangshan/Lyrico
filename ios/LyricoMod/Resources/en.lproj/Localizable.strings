@@ -415,9 +415,10 @@
 "ios_plugin_install_url" = "Install from link";
 "ios_plugin_install_url_hint" = "A plugin .zip or a plugin catalog (JSON) link";
 "ios_remote_locations" = "Remote locations";
-"ios_remote_unavailable" = "Remote folders (WebDAV / OpenList / SMB / 115) are not included in this build yet.";
+"ios_remote_unavailable" = "Remote folders are not available in this build.";
 "ios_requires_plugins" = "requires plugins";
 "ios_rescan" = "Rescan";
+"ios_retry" = "Retry";
 "ios_scan_errors" = "Scan errors";
 "ios_scan_on_launch" = "Scan library on launch";
 "ios_search_metadata" = "Search metadata";

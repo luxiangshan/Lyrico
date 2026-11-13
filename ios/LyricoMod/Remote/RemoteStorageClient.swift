@@ -91,7 +91,18 @@ final class RemoteLocationStore {
         return list
     }
 
-    func config(id: String) -> RemoteLocation? { all().first { $0.id == id } }
+    func config(id: String) -> RemoteLocation? {
+        guard var c = info(id: id) else { return nil }
+        c.secret = Keychain.read(account: "remote." + id) ?? ""
+        return c
+    }
+
+    /// Config without its secret (cheap; for display).
+    func info(id: String) -> RemoteLocation? {
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let list = try? JSONDecoder().decode([RemoteLocation].self, from: data) else { return nil }
+        return list.first { $0.id == id }
+    }
 
     func save(_ config: RemoteLocation) {
         var list = all().filter { $0.id != config.id }
@@ -108,6 +119,7 @@ final class RemoteLocationStore {
         let list = all().filter { $0.id != id }.map { c -> RemoteLocation in var x = c; x.secret = ""; return x }
         UserDefaults.standard.set(try? JSONEncoder().encode(list), forKey: key)
         Keychain.write(account: "remote." + id, value: nil)
+        Keychain.write(account: "remote.\(id).x.token", value: nil)
         RemoteStorageRegistry.shared.drop(id)
     }
 }

@@ -112,12 +112,21 @@ struct FolderRowLabel: View {
         }
     }
 
+    var subtitle: String {
+        let count = L("song_count", folder.songCount)
+        guard folder.kind == .remote else { return count }
+        let loc = folder.sourceId.flatMap { RemoteLocationStore.shared.info(id: $0) }
+        let type = loc.map { $0.type == .cloud115 ? L("remote_type_115") : $0.type.label } ?? ""
+        let where_ = [type, loc?.displayName ?? "", folder.path].filter { !$0.isEmpty }.joined(separator: " · ")
+        return where_ + " · " + count
+    }
+
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: icon).foregroundStyle(Color.accentColor).frame(width: 28)
             VStack(alignment: .leading, spacing: 2) {
                 Text(folder.kind == .documents ? L("ios_documents_folder") : folder.displayName).lineLimit(1)
-                Text(L("song_count", folder.songCount)).font(.caption).foregroundStyle(.secondary)
+                Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
             }
         }
     }

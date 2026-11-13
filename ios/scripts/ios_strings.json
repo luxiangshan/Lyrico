@@ -23,10 +23,11 @@
   "ios_plugin_install_url": {"en": "Install from link", "zh-Hans": "从链接安装"},
   "ios_plugin_install_url_hint": {"en": "A plugin .zip or a plugin catalog (JSON) link", "zh-Hans": "插件 .zip 或插件目录（JSON）链接"},
   "ios_remote_locations": {"en": "Remote locations", "zh-Hans": "远程位置"},
-  "ios_remote_unavailable": {"en": "Remote folders (WebDAV / OpenList / SMB / 115) are not included in this build yet.", "zh-Hans": "此版本暂未包含远程文件夹（WebDAV / OpenList / SMB / 115）功能。"},
+  "ios_remote_unavailable": {"en": "Remote folders are not available in this build.", "zh-Hans": "此版本暂未包含远程文件夹（WebDAV / OpenList / SMB / 115）功能。"},
   "ios_requires_plugins": {"en": "requires plugins", "zh-Hans": "需要插件"},
   "ios_rescan": {"en": "Rescan", "zh-Hans": "重新扫描"},
   "ios_scan_errors": {"en": "Scan errors", "zh-Hans": "扫描错误"},
   "ios_scan_on_launch": {"en": "Scan library on launch", "zh-Hans": "启动时扫描音乐库"},
-  "ios_search_metadata": {"en": "Search metadata", "zh-Hans": "搜索元数据"}
+  "ios_search_metadata": {"en": "Search metadata", "zh-Hans": "搜索元数据"},
+  "ios_retry": {"en": "Retry", "zh-Hans": "重试"}
 }

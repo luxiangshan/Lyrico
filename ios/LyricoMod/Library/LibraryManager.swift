@@ -137,6 +137,36 @@ final class LibraryManager: ObservableObject {
         if !ids.isEmpty { startScan(folderIds: Set(ids)) }
     }
 
+    /// Saves a remote location and makes its library folders exactly `paths` (added folders are
+    /// scanned; folders no longer selected are removed with their songs). Existing folders are rescanned
+    /// because the connection settings may have changed.
+    func saveRemoteLocation(_ location: RemoteLocation, paths: [String]) {
+        RemoteLocationStore.shared.save(location)
+        let wanted = Set(paths)
+        var ids: Set<Int64> = []
+        try? db.pool.write { db in
+            let existing = try FolderRecord.filter(Column("sourceId") == location.id).fetchAll(db)
+            for f in existing where f.kind == .remote {
+                guard let id = f.id else { continue }
+                if wanted.contains(f.path) {
+                    ids.insert(id)
+                } else {
+                    try db.execute(sql: "DELETE FROM songs WHERE folderId = ?", arguments: [id])
+                    _ = try FolderRecord.deleteOne(db, key: id)
+                }
+            }
+            let have = Set(existing.map(\.path))
+            for p in paths where !have.contains(p) {
+                let name = p == "/" ? location.displayName : (p as NSString).lastPathComponent
+                var f = FolderRecord(kind: .remote, displayName: name, path: p, bookmark: nil, sourceId: location.id)
+                try f.insert(db)
+                if let id = f.id { ids.insert(id) }
+            }
+        }
+        for id in ids { sources[id] = nil }
+        if !ids.isEmpty { startScan(folderIds: ids) }
+    }
+
     func removeFolder(_ folder: FolderRecord) {
         guard let id = folder.id, folder.kind != .documents else { return }
         sources[id] = nil
@@ -247,10 +277,22 @@ final class LibraryManager: ObservableObject {
         var done = 0
         let total = changed.count
         scan.phase = .reading(0, total)
-        for e in changed {
+        // Remote reads are network bound: read a few files at a time (Android scans remote folders in parallel).
+        let width = source.kind.isRemote ? 4 : 1
+        var tags: [String: AudioTagData] = [:]
+        for (index, e) in changed.enumerated() {
             if Task.isCancelled { break }
+            if index % width == 0 {
+                let chunk = Array(changed[index..<min(index + width, changed.count)])
+                tags = await withTaskGroup(of: (String, AudioTagData?).self) { group in
+                    for c in chunk { group.addTask { (c.path, await Self.readTag(source: source, entry: c, separator: separator)) } }
+                    var out: [String: AudioTagData] = [:]
+                    for await (p, t) in group { if let t { out[p] = t } }
+                    return out
+                }
+            }
             let uri = SongURI.make(folder: folder, path: e.path)
-            let tag = await Self.readTag(source: source, entry: e, separator: separator)
+            let tag = tags[e.path]
             done += 1
             if done % 5 == 0 || done == total { scan.phase = .reading(done, total) }
             if ignoreShort, let tag, tag.durationMilliseconds > 0, tag.durationMilliseconds < 60_000 {
@@ -303,13 +345,18 @@ final class LibraryManager: ObservableObject {
     }
 
     nonisolated static func readTag(source: LibrarySource, entry: LibraryEntry, separator: String) async -> AudioTagData? {
-        await Task.detached(priority: .utility) { () -> AudioTagData? in
-            if let url = source.localURL(for: entry.path) {
-                return try? AudioTagReader.read(url, readPictures: false, multiValueSeparator: separator, strict: true)
+        // TagLib reads synchronously and RemoteRangeReader blocks while it fetches blocks, so run this on a
+        // GCD thread instead of Swift's small cooperative pool (blocking that pool can stall the fetches).
+        await withCheckedContinuation { (cont: CheckedContinuation<AudioTagData?, Never>) in
+            DispatchQueue.global(qos: .utility).async {
+                if let url = source.localURL(for: entry.path) {
+                    cont.resume(returning: try? AudioTagReader.read(url, readPictures: false, multiValueSeparator: separator, strict: true))
+                    return
+                }
+                let reader = RemoteRangeReader(source: source, path: entry.path, length: entry.size)
+                cont.resume(returning: try? AudioTagReader.read(reader: reader, fileName: entry.name, readPictures: false, multiValueSeparator: separator))
             }
-            let reader = RemoteRangeReader(source: source, path: entry.path, length: entry.size)
-            return try? AudioTagReader.read(reader: reader, fileName: entry.name, readPictures: false, multiValueSeparator: separator)
-        }.value
+        }
     }
 
     nonisolated static func listRecursively(_ source: LibrarySource, _ dir: String, depth: Int = 0) async throws -> [LibraryEntry] {

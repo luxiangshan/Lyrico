@@ -418,6 +418,7 @@
 "ios_remote_unavailable" = "此版本暂未包含远程文件夹（WebDAV / OpenList / SMB / 115）功能。";
 "ios_requires_plugins" = "需要插件";
 "ios_rescan" = "重新扫描";
+"ios_retry" = "重试";
 "ios_scan_errors" = "扫描错误";
 "ios_scan_on_launch" = "启动时扫描音乐库";
 "ios_search_metadata" = "搜索元数据";

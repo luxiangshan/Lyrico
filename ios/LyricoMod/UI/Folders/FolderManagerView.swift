@@ -7,7 +7,13 @@ struct FolderManagerView: View {
     @State private var showPicker = false
     @State private var confirmRemove: FolderRecord?
     @State private var showRemoteInfo = false
-    @State private var showRemoteAdd = false
+    @State private var remoteEditor: RemoteEditorTarget?
+
+    struct RemoteEditorTarget: Identifiable {
+        let id = UUID()
+        let kind: RemoteKind
+        let existing: RemoteLocation?
+    }
 
     var body: some View {
         List {
@@ -45,8 +51,8 @@ struct FolderManagerView: View {
                     Section(L("ios_remote_locations")) {
                         ForEach(RemoteKind.allCases) { kind in
                             Button {
-                                if RemoteStorageRegistry.shared.isAvailable { showRemoteAdd = true } else { showRemoteInfo = true }
-                            } label: { Label(kind.label, systemImage: "network") }
+                                if RemoteStorageRegistry.shared.isAvailable { remoteEditor = RemoteEditorTarget(kind: kind, existing: nil) } else { showRemoteInfo = true }
+                            } label: { Label(kind == .cloud115 ? L("remote_type_115") : kind.label, systemImage: kind == .smb ? "server.rack" : (kind == .cloud115 ? "icloud" : "network")) }
                         }
                     }
                 } label: { Image(systemName: "plus") }
@@ -57,8 +63,15 @@ struct FolderManagerView: View {
         .sheet(isPresented: $showPicker) {
             FolderPicker { url in library.addLocalFolder(url) }
         }
-        .sheet(isPresented: $showRemoteAdd) {
-            NavigationStack { RemoteLocationPlaceholderView() }
+        .sheet(item: $remoteEditor) { target in
+            NavigationStack {
+                if let existing = target.existing {
+                    RemoteLocationEditorView(existing: existing)
+                } else {
+                    RemoteLocationEditorView(kind: target.kind)
+                }
+            }
+            .environmentObject(library)
         }
         .alert(L("ios_remote_locations"), isPresented: $showRemoteInfo) {
             Button(L("confirm"), role: .cancel) {}
@@ -79,20 +92,11 @@ struct FolderManagerView: View {
         Button { library.setIgnored(folder, !folder.isIgnored) } label: {
             Label(folder.isIgnored ? L("folder_action_show") : L("folder_action_hide"), systemImage: folder.isIgnored ? "eye" : "eye.slash")
         }
+        if folder.kind == .remote, let locId = folder.sourceId, let loc = RemoteLocationStore.shared.config(id: locId) {
+            Button { remoteEditor = RemoteEditorTarget(kind: loc.type, existing: loc) } label: { Label(L("remote_action_edit"), systemImage: "pencil") }
+        }
         if folder.kind != .documents {
             Button(role: .destructive) { confirmRemove = folder } label: { Label(L("folder_action_remove"), systemImage: "trash") }
         }
-    }
-}
-
-/// Shown when the RemoteStorage package registered a factory but has not supplied its own UI yet.
-/// INTEGRATION: replace with the package's location editor (connect form, folder browser), then call
-/// LibraryManager.shared.addRemoteFolders(location:paths:).
-struct RemoteLocationPlaceholderView: View {
-    @Environment(\.dismiss) private var dismiss
-    var body: some View {
-        Text(L("ios_remote_unavailable"))
-            .padding()
-            .toolbar { ToolbarItem(placement: .cancellationAction) { Button(L("action_close")) { dismiss() } } }
     }
 }
