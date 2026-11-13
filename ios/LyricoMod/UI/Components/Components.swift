@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 /// Async cover thumbnail backed by CoverCache.
 struct CoverThumbnail: View {

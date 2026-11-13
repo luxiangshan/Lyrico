@@ -49,7 +49,7 @@ NS_ASSUME_NONNULL_BEGIN
 /// Each entry replaces that key; an empty array (or [""]) removes the key. Other keys are kept.
 + (BOOL)savePropertyMap:(NSDictionary<NSString *, NSArray<NSString *> *> *)propertyMap atPath:(NSString *)path error:(NSError **)error;
 /// Replaces all embedded pictures; an empty array removes every picture.
-+ (BOOL)savePictures:(NSArray<LTPicture *> *)pictures atPath:(NSString *)path error:(NSError **)error;
++ (BOOL)savePictures:(NSArray<LTPicture *> *)pictures atPath:(NSString *)path error:(NSError **)error NS_SWIFT_NAME(savePictures(_:atPath:));
 
 + (nullable LTAudioProperties *)audioPropertiesWithReader:(id<LTRandomAccessReader>)reader readStyle:(NSInteger)readStyle error:(NSError **)error;
 + (nullable LTMetadata *)metadataWithReader:(id<LTRandomAccessReader>)reader readPictures:(BOOL)readPictures error:(NSError **)error;

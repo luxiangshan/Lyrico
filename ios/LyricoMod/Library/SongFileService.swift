@@ -26,23 +26,23 @@ enum SongFileService {
 
     /// Runs `body` with a readable local URL for the song (security scope active / remote copy).
     static func withReadableFile<T>(_ song: SongRecord, _ body: @escaping (URL) throws -> T) async throws -> T {
-        let source = try await source(for: song)
-        guard source.beginAccess() else { throw ServiceError(message: L("permission_denied_cannot_save")) }
-        defer { source.endAccess() }
-        if let url = source.localURL(for: song.relativePath) {
+        let src = try await source(for: song)
+        guard src.beginAccess() else { throw ServiceError(message: L("permission_denied_cannot_save")) }
+        defer { src.endAccess() }
+        if let url = src.localURL(for: song.relativePath) {
             return try await Task.detached(priority: .userInitiated) { try body(url) }.value
         }
         let local = editCacheDir.appendingPathComponent(cacheName(song))
-        try await source.download(song.relativePath, to: local)
+        try await src.download(song.relativePath, to: local)
         return try await Task.detached(priority: .userInitiated) { try body(local) }.value
     }
 
     /// Runs `body` on a writable URL, then uploads for remote sources.
     static func withWritableFile<T>(_ song: SongRecord, _ body: @escaping (URL) throws -> T) async throws -> T {
-        let source = try await source(for: song)
-        guard source.beginAccess() else { throw ServiceError(message: L("permission_denied_cannot_save")) }
-        defer { source.endAccess() }
-        if let url = source.localURL(for: song.relativePath) {
+        let src = try await source(for: song)
+        guard src.beginAccess() else { throw ServiceError(message: L("permission_denied_cannot_save")) }
+        defer { src.endAccess() }
+        if let url = src.localURL(for: song.relativePath) {
             return try await Task.detached(priority: .userInitiated) { () throws -> T in
                 var result: Result<T, Error>!
                 var coordError: NSError?
@@ -54,9 +54,9 @@ enum SongFileService {
             }.value
         }
         let local = editCacheDir.appendingPathComponent(cacheName(song))
-        try await source.download(song.relativePath, to: local)
+        try await src.download(song.relativePath, to: local)
         let value = try await Task.detached(priority: .userInitiated) { try body(local) }.value
-        try await source.upload(song.relativePath, from: local)
+        try await src.upload(song.relativePath, from: local)
         return value
     }
 
@@ -70,8 +70,8 @@ enum SongFileService {
         let sep = AppSettings.shared.multiValueSeparator
         if try await source(for: song).kind.isRemote {
             // Ranged read: only the tag area is fetched.
-            let source = try await source(for: song)
-            let reader = RemoteRangeReader(source: source, path: song.relativePath, length: song.fileSize)
+            let src = try await source(for: song)
+            let reader = RemoteRangeReader(source: src, path: song.relativePath, length: song.fileSize)
             return try await Task.detached {
                 try AudioTagReader.read(reader: reader, fileName: song.fileName, readPictures: readPictures, multiValueSeparator: sep)
             }.value
@@ -91,7 +91,7 @@ enum SongFileService {
         }
         var updated = song
         updated.apply(tag: readBack)
-        if let source = try? await source(for: song), let st = try? await source.stat(song.relativePath) {
+        if let src = try? await source(for: song), let st = try? await src.stat(song.relativePath) {
             updated.fileSize = max(0, st.size)
             updated.fileLastModified = st.modified?.timeIntervalSince1970 ?? updated.fileLastModified
         }
@@ -137,22 +137,22 @@ enum SongFileService {
         var base = sanitizeFileName(rawName)
         if base.lowercased().hasSuffix("." + ext.lowercased()) { base = String(base.dropLast(ext.count + 1)) }
         guard !base.isEmpty else { throw ServiceError(message: L("invalid_empty_input")) }
-        let source = try await source(for: song)
-        guard source.beginAccess() else { throw ServiceError(message: L("permission_denied_cannot_save")) }
-        defer { source.endAccess() }
+        let src = try await source(for: song)
+        guard src.beginAccess() else { throw ServiceError(message: L("permission_denied_cannot_save")) }
+        defer { src.endAccess() }
         let dir = song.directory
         var candidate = ext.isEmpty ? base : "\(base).\(ext)"
         if candidate == song.fileName { return song }
         var n = 1
         func exists(_ name: String) async -> Bool {
-            let entry = try? await source.stat(joinPath(dir, name))
+            let entry = try? await src.stat(joinPath(dir, name))
             return entry != nil
         }
         while candidate.lowercased() != song.fileName.lowercased(), await exists(candidate) {
             n += 1
             candidate = ext.isEmpty ? "\(base) (\(n))" : "\(base) (\(n)).\(ext)"
         }
-        let newPath = try await source.rename(song.relativePath, newName: candidate)
+        let newPath = try await src.rename(song.relativePath, newName: candidate)
         guard let folder = await LibraryManager.shared.folder(id: song.folderId) else { return song }
         var updated = song
         updated.relativePath = newPath
@@ -167,10 +167,10 @@ enum SongFileService {
     }
 
     static func delete(_ song: SongRecord) async throws {
-        let source = try await source(for: song)
-        guard source.beginAccess() else { throw ServiceError(message: L("permission_denied_cannot_save")) }
-        defer { source.endAccess() }
-        try await source.delete(song.relativePath)
+        let src = try await source(for: song)
+        guard src.beginAccess() else { throw ServiceError(message: L("permission_denied_cannot_save")) }
+        defer { src.endAccess() }
+        try await src.delete(song.relativePath)
         let id = song.id
         let folderId = song.folderId
         try await AppDatabase.shared.pool.write { db in
