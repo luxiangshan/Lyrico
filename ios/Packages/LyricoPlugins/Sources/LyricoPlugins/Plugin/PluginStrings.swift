@@ -155,7 +155,7 @@ public final class PluginStrings: @unchecked Sendable {
         #if canImport(Darwin)
         if #available(iOS 16, macOS 13, *) {
             let language = Locale.Language(identifier: tag)
-            if let script = language.maximalIdentifier.split(separator: "-").dropFirst().first(where: { $0.count == 4 }) {
+            if let script = language.maximalIdentifier.components(separatedBy: "-").dropFirst().first(where: { $0.count == 4 }) {
                 return String(script)
             }
         }
