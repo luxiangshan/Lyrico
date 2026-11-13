@@ -404,6 +404,9 @@
 "ios_integrations" = "模块";
 "ios_multi_value_separator" = "多值分隔符";
 "ios_not_ported" = "iOS 版暂未提供";
+"ios_plugin_import_file" = "从文件导入";
+"ios_plugin_install_url" = "从链接安装";
+"ios_plugin_install_url_hint" = "插件 .zip 或插件目录（JSON）链接";
 "ios_remote_locations" = "远程位置";
 "ios_remote_unavailable" = "此版本暂未包含远程文件夹（WebDAV / OpenList / SMB / 115）功能。";
 "ios_requires_plugins" = "需要插件";

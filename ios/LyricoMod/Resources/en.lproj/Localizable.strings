@@ -404,6 +404,9 @@
 "ios_integrations" = "Modules";
 "ios_multi_value_separator" = "Multi-value separator";
 "ios_not_ported" = "not available on iOS yet";
+"ios_plugin_import_file" = "Import from file";
+"ios_plugin_install_url" = "Install from link";
+"ios_plugin_install_url_hint" = "A plugin .zip or a plugin catalog (JSON) link";
 "ios_remote_locations" = "Remote locations";
 "ios_remote_unavailable" = "Remote folders (WebDAV / OpenList / SMB / 115) are not included in this build yet.";
 "ios_requires_plugins" = "requires plugins";

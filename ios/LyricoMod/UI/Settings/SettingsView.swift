@@ -1,4 +1,7 @@
 import SwiftUI
+#if canImport(LyricoPlugins)
+import LyricoPlugins
+#endif
 
 /// Settings (Android SettingsScreen subset relevant on iOS).
 struct SettingsView: View {
@@ -16,6 +19,13 @@ struct SettingsView: View {
                 Button { library.startScan() } label: { Label(L("action_refresh_folder"), systemImage: "arrow.clockwise") }
                     .disabled(library.scan.isRunning)
             }
+            #if canImport(LyricoPlugins)
+            Section {
+                NavigationLink {
+                    PluginManagerView(manager: .shared)
+                } label: { Label(L("plugin_manager_title"), systemImage: "puzzlepiece.extension") }
+            }
+            #endif
             Section(header: Text(L("section_text_processing")), footer: Text(L("artist_separator_hint"))) {
                 HStack {
                     Text(L("ios_multi_value_separator"))

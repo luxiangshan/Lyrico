@@ -17,5 +17,8 @@
   "ios_requires_plugins": {"en": "requires plugins", "zh-Hans": "需要插件"},
   "ios_rescan": {"en": "Rescan", "zh-Hans": "重新扫描"},
   "ios_scan_errors": {"en": "Scan errors", "zh-Hans": "扫描错误"},
-  "ios_scan_on_launch": {"en": "Scan library on launch", "zh-Hans": "启动时扫描音乐库"}
+  "ios_scan_on_launch": {"en": "Scan library on launch", "zh-Hans": "启动时扫描音乐库"},
+  "ios_plugin_import_file": {"en": "Import from file", "zh-Hans": "从文件导入"},
+  "ios_plugin_install_url": {"en": "Install from link", "zh-Hans": "从链接安装"},
+  "ios_plugin_install_url_hint": {"en": "A plugin .zip or a plugin catalog (JSON) link", "zh-Hans": "插件 .zip 或插件目录（JSON）链接"}
 }

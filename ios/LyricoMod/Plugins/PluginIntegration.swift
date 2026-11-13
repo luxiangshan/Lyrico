@@ -82,6 +82,8 @@ enum PluginIntegration {
     @MainActor
     static func register() {
         #if canImport(LyricoPlugins)
+        // Loads plugins.json and cleans leftovers of interrupted installs.
+        _ = PluginManager.shared
         // INTEGRATION: register real actions here, e.g.
         // BatchActionRegistry.shared.register(BatchActionDescriptor(id: "match_lyrics", title: L("action_batch_match_lyrics"),
         //     systemImage: "text.quote", isAvailable: true) { songs, progress in ... use SongFileService.apply(...) ... })
