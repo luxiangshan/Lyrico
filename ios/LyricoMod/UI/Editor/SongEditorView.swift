@@ -100,12 +100,8 @@ struct TagEditorForm: View {
         #if canImport(LyricoPlugins)
         .sheet(item: $searchSheet) { kind in EditorSearchSheetView(kind: kind, model: model) }
         #endif
-        .fileImporter(isPresented: $showImageImporter, allowedContentTypes: [.image]) { result in
-            if case .success(let url) = result {
-                let ok = url.startAccessingSecurityScopedResource()
-                defer { if ok { url.stopAccessingSecurityScopedResource() } }
-                if let data = try? Data(contentsOf: url) { model.setCover(ImageMime.normalizedForTag(data)) }
-            }
+        .documentImporter(isPresented: $showImageImporter, allowedContentTypes: [.image]) { urls in
+            if let url = urls.first, let data = try? Data(contentsOf: url) { model.setCover(ImageMime.normalizedForTag(data)) }
         }
         .onChange(of: photoItem) { item in
             guard let item else { return }
@@ -318,10 +314,8 @@ struct LyricsEditorView: View {
                     Button(L("source_config_save")) { Task { await model.save() } }.disabled(!model.hasChanges)
                 }
             }
-            .fileImporter(isPresented: $showImporter, allowedContentTypes: [.plainText, UTType(filenameExtension: "lrc") ?? .plainText, UTType(filenameExtension: "ttml") ?? .xml, .xml]) { result in
-                if case .success(let url) = result {
-                    let ok = url.startAccessingSecurityScopedResource()
-                    defer { if ok { url.stopAccessingSecurityScopedResource() } }
+            .documentImporter(isPresented: $showImporter, allowedContentTypes: [.plainText, UTType(filenameExtension: "lrc") ?? .plainText, UTType(filenameExtension: "ttml") ?? .xml, .xml, .data]) { urls in
+                if let url = urls.first {
                     if let data = try? Data(contentsOf: url) {
                         let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .utf16) ?? ""
                         model.edited.lyrics = text

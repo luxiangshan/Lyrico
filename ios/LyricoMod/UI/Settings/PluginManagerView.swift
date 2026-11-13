@@ -96,11 +96,7 @@ struct PluginManagerView: View {
                 ProgressView(L("plugin_action_working")).padding(20).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
             }
         }
-        .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.zip], allowsMultipleSelection: true) { result in
-            guard case .success(let urls) = result else {
-                if case .failure(let error) = result { message = L("plugin_action_failed", error.localizedDescription) }
-                return
-            }
+        .documentImporter(isPresented: $showFileImporter, allowedContentTypes: [.zip, .archive, UTType(filenameExtension: "lyricoplugin") ?? .zip], allowsMultipleSelection: true) { urls in
             Task { await importFiles(urls) }
         }
         .alert(L("ios_plugin_install_url"), isPresented: $showURLPrompt) {
