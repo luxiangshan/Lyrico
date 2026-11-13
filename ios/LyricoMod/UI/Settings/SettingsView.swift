@@ -24,7 +24,14 @@ struct SettingsView: View {
                 NavigationLink {
                     PluginManagerView(manager: .shared)
                 } label: { Label(L("plugin_manager_title"), systemImage: "puzzlepiece.extension") }
+                Stepper(value: $settings.searchPageSize, in: 1...50) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(L("search_limit") + "：\(settings.searchPageSize)")
+                        Text(L("search_limit_tip")).font(.caption).foregroundStyle(.secondary)
+                    }
+                }
             }
+            LyricSettingsSection()
             #endif
             Section(header: Text(L("section_text_processing")), footer: Text(L("artist_separator_hint"))) {
                 HStack {
@@ -115,3 +122,75 @@ struct LicensesView: View {
         .navigationTitle(L("title_opensource_licence"))
     }
 }
+
+#if canImport(LyricoPlugins)
+/// Lyrics render settings (Android SettingsScreen "歌词" section); used by plugin lyric search and batch match.
+struct LyricSettingsSection: View {
+    @EnvironmentObject private var settings: AppSettings
+
+    var body: some View {
+        Section(L("section_lyrics")) {
+            Picker(L("lyric_mode"), selection: $settings.lyricFormat) {
+                ForEach(LyricFormat.allCases, id: \.rawValue) { Text(L($0.labelKey)).tag($0.rawValue) }
+            }
+            toggle("translation", "translation_hint", $settings.lyricShowTranslation)
+            toggle("roma", "roma_hint", $settings.lyricShowRomanization)
+            toggle("only_translation_if_available", "only_translation_if_available_hint", $settings.lyricOnlyTranslation)
+                .disabled(!settings.lyricShowTranslation)
+            NavigationLink {
+                LyricLineOrderView()
+            } label: {
+                HStack {
+                    Text(L("lyric_line_order"))
+                    Spacer()
+                    Text(lineOrderSummary).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            toggle("remove_empty_lines", "remove_empty_lines_hint", $settings.lyricRemoveEmptyLines)
+            Picker(selection: $settings.lyricConversionMode) {
+                ForEach(ConversionMode.allCases, id: \.rawValue) { Text(L($0.labelKey)).tag($0.rawValue) }
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L("conversion_mode"))
+                    Text(L("conversion_mode_hint")).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private var lineOrderSummary: String {
+        let visible = visibleLyricLineTracks(showRomanization: settings.lyricShowRomanization,
+                                             showTranslation: settings.lyricShowTranslation,
+                                             onlyTranslationIfAvailable: settings.lyricOnlyTranslation)
+        return settings.lyricLineOrderTracks.filter(visible.contains).map { L($0.labelKey) }.joined(separator: " › ")
+    }
+
+    private func toggle(_ title: String, _ hint: String, _ isOn: Binding<Bool>) -> some View {
+        Toggle(isOn: isOn) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(L(title))
+                Text(L(hint)).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+struct LyricLineOrderView: View {
+    @EnvironmentObject private var settings: AppSettings
+
+    var body: some View {
+        List {
+            ForEach(settings.lyricLineOrderTracks, id: \.self) { track in
+                Text(L(track.labelKey))
+            }
+            .onMove { from, to in
+                var order = settings.lyricLineOrderTracks
+                order.move(fromOffsets: from, toOffset: to)
+                settings.lyricLineOrder = order.map(\.rawValue).joined(separator: ",")
+            }
+        }
+        .environment(\.editMode, .constant(.active))
+        .navigationTitle(L("lyric_line_order"))
+    }
+}
+#endif

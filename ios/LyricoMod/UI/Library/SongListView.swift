@@ -61,7 +61,8 @@ struct SongListView: View {
                     switch sheet {
                     case .edit(let ids): BatchEditView(songIds: ids)
                     case .rename(let ids): BatchRenameView(songIds: ids)
-                    case .action(let d, let ids): BatchActionRunnerView(descriptor: d, songIds: ids)
+                    case .action(let d, let ids):
+                        if let make = d.makeView { make(ids) } else { BatchActionRunnerView(descriptor: d, songIds: ids) }
                     }
                 }
             }

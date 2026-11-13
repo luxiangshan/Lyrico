@@ -1,6 +1,9 @@
 import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
+#if canImport(LyricoPlugins)
+import LyricoPlugins
+#endif
 
 /// Song detail / tag editor (Android EditMetadataScreen).
 struct SongEditorView: View {
@@ -38,6 +41,9 @@ struct TagEditorForm: View {
     @State private var newCustomValue = ""
     @State private var showRename = false
     @State private var renameText = ""
+    #if canImport(LyricoPlugins)
+    @State private var searchSheet: EditorSearchSheet?
+    #endif
 
     var body: some View {
         Group {
@@ -66,6 +72,14 @@ struct TagEditorForm: View {
                 }
             }
             ToolbarItemGroup(placement: .secondaryAction) {
+                #if canImport(LyricoPlugins)
+                Button { searchSheet = .metadata } label: { Label(L("ios_search_metadata"), systemImage: "magnifyingglass") }
+                    .disabled(model.target == nil || model.loadError != nil)
+                Button { searchSheet = .lyrics } label: { Label(L("action_search_lyrics"), systemImage: "text.quote") }
+                    .disabled(model.target == nil || model.loadError != nil)
+                Button { searchSheet = .cover } label: { Label(L("action_search_cover"), systemImage: "photo.on.rectangle.angled") }
+                    .disabled(model.target == nil || model.loadError != nil)
+                #endif
                 Button { model.revert() } label: { Label(L("action_undo_changes"), systemImage: "arrow.uturn.backward") }
                     .disabled(!model.hasChanges)
                 if let song = model.song {
@@ -83,6 +97,9 @@ struct TagEditorForm: View {
             }
         }
         .sheet(item: $share) { ShareSheet(items: $0.items) }
+        #if canImport(LyricoPlugins)
+        .sheet(item: $searchSheet) { kind in EditorSearchSheetView(kind: kind, model: model) }
+        #endif
         .fileImporter(isPresented: $showImageImporter, allowedContentTypes: [.image]) { result in
             if case .success(let url) = result {
                 let ok = url.startAccessingSecurityScopedResource()
@@ -215,6 +232,9 @@ struct TagEditorForm: View {
                         Label(L("ios_cover_from_photos"), systemImage: "photo.on.rectangle")
                     }
                     Button { showImageImporter = true } label: { Label(L("ios_cover_from_files"), systemImage: "folder") }
+                    #if canImport(LyricoPlugins)
+                    Button { searchSheet = .cover } label: { Label(L("action_search_cover"), systemImage: "magnifyingglass") }
+                    #endif
                     Button(role: .destructive) { model.removeCover() } label: { Label(L("label_remove_cover"), systemImage: "trash") }
                         .disabled(model.coverData == nil)
                     Button {
@@ -264,6 +284,9 @@ struct LyricsEditorView: View {
     @ObservedObject var model: SongEditorModel
     @State private var showImporter = false
     @State private var share: ShareItems?
+    #if canImport(LyricoPlugins)
+    @State private var searchSheet: EditorSearchSheet?
+    #endif
 
     var body: some View {
         TextEditor(text: Binding(get: { model.edited.lyrics ?? "" }, set: { model.edited.lyrics = $0.isEmpty ? nil : $0 }))
@@ -273,6 +296,9 @@ struct LyricsEditorView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
+                    #if canImport(LyricoPlugins)
+                    Button { searchSheet = .lyrics } label: { Label(L("action_search_lyrics"), systemImage: "magnifyingglass") }
+                    #endif
                     Menu {
                         Button { showImporter = true } label: { Label(L("action_import_lyrics"), systemImage: "square.and.arrow.down") }
                         Button {
@@ -306,6 +332,9 @@ struct LyricsEditorView: View {
                 }
             }
             .sheet(item: $share) { ShareSheet(items: $0.items) }
+            #if canImport(LyricoPlugins)
+            .sheet(item: $searchSheet) { kind in EditorSearchSheetView(kind: kind, model: model) }
+            #endif
             .banner($model.message)
     }
 }

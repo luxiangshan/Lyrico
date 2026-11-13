@@ -17,6 +17,8 @@ struct BatchActionDescriptor: Identifiable, Hashable {
     let isAvailable: Bool
     /// Runs the action. `progress(done, total)` must be called on the main actor.
     let run: @MainActor (_ songs: [SongRecord], _ progress: @escaping @MainActor (Int, Int) -> Void) async -> BatchResult
+    /// Optional custom sheet content (replaces the generic runner).
+    var makeView: (@MainActor (_ songIds: [Int64]) -> AnyView)? = nil
 
     static func == (a: Self, b: Self) -> Bool { a.id == b.id }
     func hash(into h: inout Hasher) { h.combine(id) }
@@ -84,13 +86,20 @@ enum PluginIntegration {
         #if canImport(LyricoPlugins)
         // Loads plugins.json and cleans leftovers of interrupted installs.
         _ = PluginManager.shared
-        // INTEGRATION: register real actions here, e.g.
-        // BatchActionRegistry.shared.register(BatchActionDescriptor(id: "match_lyrics", title: L("action_batch_match_lyrics"),
-        //     systemImage: "text.quote", isAvailable: true) { songs, progress in ... use SongFileService.apply(...) ... })
-        // LyricsHookRegistry.shared.actions.append(LyricsHookAction(id: "search_lyrics", ...))
+        let noop: @MainActor ([SongRecord], @escaping @MainActor (Int, Int) -> Void) async -> BatchResult = { songs, _ in
+            BatchResult(skipped: songs.count)
+        }
+        for (id, key, icon, kind) in [("match_metadata", "action_batch_match_metadata", "text.badge.checkmark", BatchMatchKind.metadata),
+                                      ("match_lyrics", "action_batch_match_lyrics", "text.quote", BatchMatchKind.lyrics),
+                                      ("match_cover", "action_batch_match_cover", "photo.stack", BatchMatchKind.cover)] {
+            BatchActionRegistry.shared.register(BatchActionDescriptor(
+                id: id, title: L(key), systemImage: icon, isAvailable: true, run: noop,
+                makeView: { ids in AnyView(BatchMatchView(songIds: ids, initialKinds: [kind])) }))
+        }
+        // Lyrics search is a direct editor action (PluginSearchViews), no hook needed.
         #endif
         BatchActionRegistry.shared.registerPlaceholders()
-        if LyricsHookRegistry.shared.actions.isEmpty {
+        if !isPackageLinked && LyricsHookRegistry.shared.actions.isEmpty {
             LyricsHookRegistry.shared.actions.append(LyricsHookAction(
                 id: "search_lyrics", title: L("action_search_lyrics") + " · " + L("ios_requires_plugins"),
                 systemImage: "magnifyingglass", isAvailable: false, run: { _ in }))

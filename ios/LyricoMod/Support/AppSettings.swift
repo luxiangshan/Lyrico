@@ -63,6 +63,24 @@ final class AppSettings: ObservableObject {
     @AppStorage("scan_on_launch") var scanOnLaunch: Bool = true
     @AppStorage("cover_cache_limit_mb") var coverCacheLimitMB: Int = 128
 
+    // Lyrics render settings (Android SettingsDefaults / LyricRenderConfig defaults).
+    /// PLAIN_LRC / VERBATIM_LRC / ENHANCED_LRC / TTML.
+    @AppStorage("lyric_format") var lyricFormat: String = "VERBATIM_LRC"
+    @AppStorage("lyric_show_translation") var lyricShowTranslation: Bool = true
+    @AppStorage("lyric_show_romanization") var lyricShowRomanization: Bool = true
+    @AppStorage("lyric_only_translation") var lyricOnlyTranslation: Bool = false
+    /// Comma separated ORIGINAL / ROMANIZATION / TRANSLATION.
+    @AppStorage("lyric_line_order") var lyricLineOrder: String = "ORIGINAL,ROMANIZATION,TRANSLATION"
+    @AppStorage("lyric_remove_empty_lines") var lyricRemoveEmptyLines: Bool = true
+    /// NONE / TRADITIONAL_TO_SIMPLIFIED / SIMPLIFIED_TO_TRADITIONAL.
+    @AppStorage("lyric_conversion_mode") var lyricConversionMode: String = "NONE"
+    /// Results per source per page (Android SEARCH_PAGE_SIZE = 10).
+    @AppStorage("search_page_size") var searchPageSize: Int = 10
+    // Batch match options (Android BatchMatchConfig defaults).
+    @AppStorage("batch_match_overwrite") var batchMatchOverwrite: Bool = false
+    @AppStorage("batch_match_prefer_filename") var batchMatchPreferFileName: Bool = false
+    @AppStorage("batch_match_concurrency") var batchMatchConcurrency: Int = 2
+
     var sortBy: SongSortBy { SongSortBy(rawValue: songSortBy) ?? .title }
 
     func splitArtists(_ value: String?) -> [String] {
