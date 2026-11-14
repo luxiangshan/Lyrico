@@ -72,9 +72,9 @@ enum SongFileService {
             // Ranged read: only the tag area is fetched.
             let src = try await source(for: song)
             let reader = RemoteRangeReader(source: src, path: song.relativePath, length: song.fileSize)
-            return try await Task.detached {
+            return try await RemoteTagIO.runThrowing { () throws -> AudioTagData in
                 try AudioTagReader.read(reader: reader, fileName: song.fileName, readPictures: readPictures, multiValueSeparator: sep)
-            }.value
+            }
         }
         return try await withReadableFile(song) { url in
             try AudioTagReader.read(url, readPictures: readPictures, multiValueSeparator: sep, strict: true)

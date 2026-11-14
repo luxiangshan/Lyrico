@@ -41,7 +41,8 @@ final class CoverCache {
             memory.setObject(img, forKey: k as NSString)
             return img
         }
-        let bytes: Data? = try? await readCover(song)
+        let bytes: Data?
+        do { bytes = try await readCover(song) } catch { return nil }
         guard let bytes, !bytes.isEmpty, let thumb = Self.thumbnail(bytes, maxPixel: Self.thumbnailSize) else {
             FileManager.default.createFile(atPath: none.path, contents: Data())
             return nil
@@ -56,10 +57,13 @@ final class CoverCache {
         let source = try await SongFileService.source(for: song)
         if source.kind.isRemote {
             let reader = RemoteRangeReader(source: source, path: song.relativePath, length: song.fileSize)
-            return await Task.detached(priority: .utility) {
+            let data = await RemoteTagIO.run { () -> Data in
                 let pics = TagLib.getPictures(reader: reader)
                 return TagLib.selectPicture(pics, pictureType: .frontCover, fallbackPictureTypes: [], fallbackToAny: true, description: nil)?.data ?? Data()
-            }.value
+            }
+            // A network failure is not "no cover": don't write the .none marker, retry next time.
+            if data.isEmpty && reader.failed { throw SongFileService.ServiceError(message: "cover read failed") }
+            return data
         }
         return try await SongFileService.withReadableFile(song) { url in
             AudioTagReader.readPicture(url)

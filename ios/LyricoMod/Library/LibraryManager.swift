@@ -345,17 +345,17 @@ final class LibraryManager: ObservableObject {
     }
 
     nonisolated static func readTag(source: LibrarySource, entry: LibraryEntry, separator: String) async -> AudioTagData? {
-        // TagLib reads synchronously and RemoteRangeReader blocks while it fetches blocks, so run this on a
-        // GCD thread instead of Swift's small cooperative pool (blocking that pool can stall the fetches).
-        await withCheckedContinuation { (cont: CheckedContinuation<AudioTagData?, Never>) in
-            DispatchQueue.global(qos: .utility).async {
-                if let url = source.localURL(for: entry.path) {
+        if let url = source.localURL(for: entry.path) {
+            return await withCheckedContinuation { (cont: CheckedContinuation<AudioTagData?, Never>) in
+                DispatchQueue.global(qos: .utility).async {
                     cont.resume(returning: try? AudioTagReader.read(url, readPictures: false, multiValueSeparator: separator, strict: true))
-                    return
                 }
-                let reader = RemoteRangeReader(source: source, path: entry.path, length: entry.size)
-                cont.resume(returning: try? AudioTagReader.read(reader: reader, fileName: entry.name, readPictures: false, multiValueSeparator: separator))
             }
+        }
+        // Remote: TagLib blocks while RemoteRangeReader fetches blocks; keep it off the cooperative pool.
+        let reader = RemoteRangeReader(source: source, path: entry.path, length: entry.size)
+        return await RemoteTagIO.run { () -> AudioTagData? in
+            try? AudioTagReader.read(reader: reader, fileName: entry.name, readPictures: false, multiValueSeparator: separator)
         }
     }
 

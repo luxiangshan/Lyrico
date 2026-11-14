@@ -162,6 +162,8 @@ final class RemoteRangeReader: NSObject, LTRandomAccessReader {
     private var blocks: [Int64: Data] = [:]
     private var order: [Int64] = []
     private let maxBlocks = 32
+    /// True once a block could not be fetched (network error / timeout): the result is incomplete.
+    private(set) var failed = false
 
     init(source: LibrarySource, path: String, length: Int64) {
         self.source = source
@@ -193,15 +195,49 @@ final class RemoteRangeReader: NSObject, LTRandomAccessReader {
         let sem = DispatchSemaphore(value: 0)
         var result: Data?
         let src = source, p = path, off = index * blockSize, len = min(blockSize, length - index * blockSize)
-        Task.detached {
+        let task = Task.detached {
             result = try? await src.openRange(p, offset: off, length: len)
             sem.signal()
         }
-        sem.wait()
-        guard let data = result else { return nil }
+        // Never wait forever: a stalled request must not freeze the scan or the editor.
+        if sem.wait(timeout: .now() + 90) == .timedOut {
+            task.cancel()
+            failed = true
+            return nil
+        }
+        guard let data = result else { failed = true; return nil }
         blocks[index] = data
         order.append(index)
         if order.count > maxBlocks { blocks.removeValue(forKey: order.removeFirst()) }
         return data
+    }
+}
+
+/// TagLib over a RemoteRangeReader blocks its thread while blocks download (through Swift concurrency).
+/// That work must never run on the cooperative thread pool (Task / Task.detached): a handful of blocked
+/// readers (cover thumbnails of the visible rows, the scan, the editor) would take every cooperative
+/// thread, the downloads they wait for could never run, and everything would hang. So blocking remote
+/// tag work runs on its own bounded GCD queue instead.
+enum RemoteTagIO {
+    private static let queue: OperationQueue = {
+        let q = OperationQueue()
+        q.name = "remote-tag-io"
+        q.maxConcurrentOperationCount = 6
+        q.qualityOfService = .utility
+        return q
+    }()
+
+    static func runThrowing<T>(_ body: @escaping () throws -> T) async throws -> T {
+        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<T, Error>) in
+            queue.addOperation {
+                do { cont.resume(returning: try body()) } catch { cont.resume(throwing: error) }
+            }
+        }
+    }
+
+    static func run<T>(_ body: @escaping () -> T) async -> T {
+        await withCheckedContinuation { (cont: CheckedContinuation<T, Never>) in
+            queue.addOperation { cont.resume(returning: body()) }
+        }
     }
 }
