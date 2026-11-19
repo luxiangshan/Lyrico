@@ -105,6 +105,8 @@ fun App(state: AppState) {
         if (state.showSettings) SettingsDialog(state)
         if (state.showRemoteDialog) RemoteDialog(state)
         if (state.showPlugins) PluginsDialog(state)
+        state.plugins.session?.let { com.lonx.lyrico.desktop.ui.PluginSearchDialog(state, it) }
+        state.plugins.confirmBatch?.let { com.lonx.lyrico.desktop.ui.BatchMatchConfirm(state, it) }
         state.pendingSelection?.let { pending ->
             AlertDialog(
                 onDismissRequest = { state.pendingSelection = null },

@@ -286,6 +286,14 @@ class AppState(val scope: CoroutineScope) {
         }
     }
 
+    fun setCoverBytes(bytes: ByteArray) {
+        val e = editor ?: return
+        if (ImageUtils.decode(bytes) == null) { toast("无法识别该图片"); return }
+        val art = CoverArt(bytes, CoverArt.sniffMime(bytes))
+        e.cover = art
+        e.coverChange = CoverChange.Replace(art)
+    }
+
     fun removeCover() {
         val e = editor ?: return
         e.cover = null
@@ -317,7 +325,7 @@ class AppState(val scope: CoroutineScope) {
 
     // ---------------------------------------------------------------- batch actions
 
-    private fun runBatch(title: String, list: List<Song>, op: (Song) -> String?) {
+    fun runBatch(title: String, list: List<Song>, op: (Song) -> String?) {
         if (list.isEmpty()) return
         scope.launch {
             val failures = ArrayList<String>()

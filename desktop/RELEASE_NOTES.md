@@ -15,3 +15,4 @@
 - 远程位置：WebDAV、OpenList/Alist、SMB、115（扫码登录）——下载编辑后上传覆盖，LRC 上传到歌曲旁边。
 
 数据目录：`%APPDATA%\LyricoMod`。
+- 插件：与安卓版通用的 JS 插件（GraalJS 运行），支持本地导入 ZIP、订阅 catalog.json 在线安装/更新、插件配置与排序；编辑页可搜索歌词 / 封面 / 歌曲信息，多选可批量匹配歌词。

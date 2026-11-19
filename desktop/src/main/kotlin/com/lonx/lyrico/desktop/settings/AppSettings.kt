@@ -22,6 +22,10 @@ data class AppSettings(
     val sortDescending: Boolean = false,
     val darkTheme: Boolean = false,
     val scanThreads: Int = 4,
+    val pluginIncludeTranslation: Boolean = false,
+    val pluginWordByWord: Boolean = false,
+    val pluginCatalogUrl: String = "https://github.com/Replica0110/Lyrico-Plugins/releases/latest/download/catalog.json",
+    val batchSkipExistingLyrics: Boolean = true,
 ) {
     val tagOptions get() = TagWriteOptions(id3Version = id3Version, usltLanguage = usltLanguage)
     val lrcOptions get() = LrcWriteOptions(bom = lrcBom, lineEnding = lrcLineEnding)
