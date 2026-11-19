@@ -29,6 +29,10 @@ dependencies {
     implementation("org.json:json:20240303")
     implementation("com.google.zxing:core:3.5.3")
     implementation("net.java.dev.jna:jna-platform:5.17.0")
+    // plugins: GraalJS (pure Java, interpreter mode on a stock JDK) + kXML for the XML host API
+    implementation("org.graalvm.polyglot:polyglot:24.2.2")
+    implementation("org.graalvm.polyglot:js-community:24.2.2")
+    implementation("net.sf.kxml:kxml2:2.3.0")
 
     testImplementation(kotlin("test"))
     testImplementation("junit:junit:4.13.2")
@@ -48,7 +52,7 @@ compose.desktop {
             targetFormats(TargetFormat.Msi)
             packageName = "Lyrico Mod"
             packageVersion = "1.7.0"
-            description = "Lyrico Mod - 音乐标签与歌词编辑器"
+            description = "Lyrico Mod - music tag and lyrics editor"
             vendor = "luxiangshan"
             copyright = "GPL-3.0"
             modules(

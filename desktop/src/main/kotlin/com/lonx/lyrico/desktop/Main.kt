@@ -43,7 +43,11 @@ import com.lonx.lyrico.desktop.ui.SongListPane
 
 const val APP_VERSION = "1.7.0"
 
-fun main() {
+fun main(args: Array<String>) {
+    if (args.firstOrNull() == "--selftest") {
+        val ok = SelfTest.run(java.io.File(args.getOrNull(1) ?: "lyrico-selftest.txt"))
+        kotlin.system.exitProcess(if (ok) 0 else 1)
+    }
     Dialogs.initLookAndFeel()
     val icon = Thread.currentThread().contextClassLoader.getResourceAsStream("icon.png")?.use { it.readBytes() }
         ?.let { ImageUtils.decode(it) }?.let { BitmapPainter(it) }

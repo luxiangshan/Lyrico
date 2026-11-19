@@ -36,6 +36,17 @@ jobs:
       - name: Package MSI and app image
         run: ./gradlew.bat --no-daemon --console=plain packageDistributionForCurrentOS createDistributable
 
+      - name: Self-test the packaged app (bundled JRE, tags, LRC, GraalJS)
+        run: |
+          $report = Join-Path $env:RUNNER_TEMP "selftest.txt"
+          $p = Start-Process -FilePath "build/compose/binaries/main/app/Lyrico Mod/Lyrico Mod.exe" -ArgumentList @("--selftest", "`"$report`"") -Wait -PassThru
+          if (Test-Path $report) { Get-Content $report -Encoding UTF8 } else { throw "self-test wrote no report (exit $($p.ExitCode))" }
+          if (-not (Select-String -Path $report -Pattern "SELFTEST OK" -Quiet)) { throw "self-test failed" }
+
+      - name: Show jpackage logs on failure
+        if: failure()
+        run: Get-ChildItem -Recurse build/compose/logs -Filter *.txt -ErrorAction SilentlyContinue | ForEach-Object { "==== $($_.FullName)"; Get-Content $_.FullName -Tail 80 }
+
       - name: Collect artifacts
         id: collect
         run: |
