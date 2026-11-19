@@ -32,12 +32,12 @@ object LrcFiles {
 
     /** Adjacent .lrc (exact name first, then case-insensitive). */
     fun findAdjacent(audio: File): File? {
-        val exact = lrcFileFor(audio)
-        if (exact.isFile) return exact
         val base = audio.nameWithoutExtension
-        return audio.parentFile?.listFiles { f ->
+        // List siblings so the real on-disk name is returned (Windows paths are case-insensitive).
+        val matches = audio.parentFile?.listFiles { f ->
             f.isFile && f.extension.equals("lrc", true) && f.nameWithoutExtension.equals(base, true)
-        }?.firstOrNull()
+        }.orEmpty()
+        return matches.firstOrNull { it.name == "$base.lrc" } ?: matches.firstOrNull()
     }
 
     fun read(file: File): String = decode(file.readBytes())
