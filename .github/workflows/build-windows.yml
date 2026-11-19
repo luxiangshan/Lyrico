@@ -1,0 +1,69 @@
+name: Build Windows (Lyrico Mod Desktop)
+
+on:
+  push:
+    branches: [ windows ]
+  workflow_dispatch:
+
+concurrency:
+  group: build-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Unit tests
+        run: ./gradlew.bat --no-daemon --console=plain test
+
+      - name: Package MSI and app image
+        run: ./gradlew.bat --no-daemon --console=plain packageDistributionForCurrentOS createDistributable
+
+      - name: Collect artifacts
+        id: collect
+        run: |
+          $short = "${{ github.sha }}".Substring(0, 7)
+          $out = Join-Path $env:GITHUB_WORKSPACE "dist"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          $msi = Get-ChildItem -Recurse -Path build/compose/binaries/main/msi -Filter *.msi | Select-Object -First 1
+          if (-not $msi) { throw "MSI not found" }
+          Copy-Item $msi.FullName (Join-Path $out "LyricoMod-1.7.0-$short-windows-x64.msi")
+          $app = "build/compose/binaries/main/app/Lyrico Mod"
+          if (-not (Test-Path "$app/Lyrico Mod.exe")) { throw "app image not found" }
+          if (-not (Test-Path "$app/runtime")) { throw "bundled runtime missing" }
+          Compress-Archive -Path $app -DestinationPath (Join-Path $out "LyricoMod-1.7.0-$short-windows-x64-portable.zip") -CompressionLevel Optimal
+          Get-ChildItem $out | Format-Table Name, Length
+          "short=$short" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LyricoMod-windows-${{ steps.collect.outputs.short }}
+          path: dist/*
+          if-no-files-found: error
+
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "win-${{ steps.collect.outputs.short }}"
+          $files = Get-ChildItem (Join-Path $env:GITHUB_WORKSPACE "dist") | ForEach-Object { $_.FullName }
+          gh release delete $tag --repo $env:GITHUB_REPOSITORY --yes --cleanup-tag 2>$null
+          $notes = Join-Path $env:GITHUB_WORKSPACE "desktop/RELEASE_NOTES.md"
+          gh release create $tag @files --repo $env:GITHUB_REPOSITORY --target ${{ github.sha }} --prerelease --title "Lyrico Mod for Windows 1.7.0 ($tag)" --notes-file $notes
