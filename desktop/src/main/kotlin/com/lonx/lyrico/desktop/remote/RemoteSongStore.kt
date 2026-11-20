@@ -64,6 +64,15 @@ class RemoteSongStore(
             tmp.delete()
             throw IOException("下载「${song.fileName}」失败：${RemoteErrors.friendly(e)}", e)
         }
+        // Never edit (and later upload over the original) a truncated copy: a dropped connection can end the stream early.
+        if (song.size > 0 && tmp.length() != song.size) {
+            val remoteSize = try { storage().stat(song.path)?.size ?: -1L } catch (_: Exception) { -1L }
+            if (remoteSize != tmp.length()) {
+                val got = tmp.length()
+                tmp.delete()
+                throw IOException("下载「${song.fileName}」不完整（收到 $got 字节，应为 ${if (remoteSize >= 0) remoteSize else song.size} 字节），已取消，未修改远程文件")
+            }
+        }
         f.delete()
         if (!tmp.renameTo(f)) { tmp.copyTo(f, true); tmp.delete() }
         metaFile(song).writeText("${song.size}|${song.modified}")

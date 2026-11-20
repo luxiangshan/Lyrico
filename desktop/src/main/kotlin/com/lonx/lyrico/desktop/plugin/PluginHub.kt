@@ -68,6 +68,16 @@ object MatchScore {
     }
 }
 
+/** A running or finished 批量匹配: per-song results stream in. */
+class BatchMatchRun(val songs: List<Song>, val config: BatchMatchConfig, val sourceNames: List<String>) {
+    val results = mutableStateListOf<SongMatchResult>()
+    val inProgress = mutableStateListOf<String>()
+    var finished by mutableStateOf(false)
+    var cancelled by mutableStateOf(false)
+    var job: Job? = null
+    fun count(s: MatchStatus) = results.count { it.status == s }
+}
+
 class PluginHub(private val app: AppState, val repo: PluginRepository = PluginRepository()) {
     var plugins by mutableStateOf(repo.installed())
         private set
@@ -289,6 +299,87 @@ class PluginHub(private val app: AppState, val repo: PluginRepository = PluginRe
         session = null
         if (s.applyCoverWithMetadata && pic.isNotBlank()) applyCover(s, CoverCandidate(song.sourceId, song.sourceName, song.title, song.artist, song.album, song.year, pic))
         app.toast("已填入「${song.sourceName}」的歌曲信息，保存后生效")
+    }
+
+    // ---------------------------------------------------------------- 批量匹配 (Android batch match)
+
+    var matchRun by mutableStateOf<BatchMatchRun?>(null)
+    /** Plugins ticked for 批量匹配 this run (default: every plugin enabled for metadata, lyrics or covers). */
+    val matchSelected = mutableStateListOf<String>()
+    private var matchSelectionInit = false
+
+    /** Plugins usable by 批量匹配 (enabled for any of 歌曲信息/歌词/封面), in the user's order. */
+    fun matchPlugins(): List<InstalledPlugin> =
+        (enabled(SearchKind.METADATA) + enabled(SearchKind.LYRICS) + enabled(SearchKind.COVER)).distinctBy { it.id }.sortedBy { state(it.id).order }
+
+    /** Called when the batch pane opens: keeps the user's ticks, adds newly enabled plugins, drops disabled ones. */
+    fun syncMatchSelection() {
+        val ids = matchPlugins().map { it.id }
+        if (!matchSelectionInit) { matchSelected.clear(); matchSelected.addAll(ids); matchSelectionInit = true; return }
+        matchSelected.retainAll(ids.toSet())
+    }
+
+    private fun matchSource(p: InstalledPlugin): MatchSource = object : MatchSource {
+        override val id = p.id
+        override val name = p.displayName
+        override val searchesSongs = PluginManifest.CAP_SEARCH_SONGS in p.caps
+        override val providesLyrics = PluginManifest.CAP_GET_LYRICS in p.caps
+        override val searchesCovers = PluginManifest.CAP_SEARCH_COVERS in p.caps
+        override fun searchSongs(keyword: String, pageSize: Int) = source(p).searchSongs(keyword, pageSize = pageSize, separator = "/")
+        override fun lyrics(song: PluginSong) = source(p).getLyrics(song, formatOptions)
+        override fun searchCovers(keyword: String) = source(p).searchCovers(keyword)
+    }
+
+    /** Starts 批量匹配 over [songs] with the saved config and the ticked plugins. */
+    fun startBatchMatch(songs: List<Song>, cfg: BatchMatchConfig = app.settings.batchMatchConfig, sourceIds: Collection<String> = matchSelected.toList()) {
+        if (songs.isEmpty() || matchRun?.finished == false) return
+        if (cfg.targets.isEmpty()) { app.toast("请先勾选要匹配的字段"); return }
+        val ids = sourceIds.toSet()
+        val meta = enabled(SearchKind.METADATA).filter { it.id in ids }
+        val lyr = enabled(SearchKind.LYRICS).filter { it.id in ids }
+        val cov = enabled(SearchKind.COVER).filter { it.id in ids }
+        if (meta.isEmpty() && lyr.isEmpty() && cov.isEmpty()) { app.toast("没有勾选可用的插件（在 插件管理 中安装并启用）"); return }
+        val metaS = meta.map(::matchSource); val lyrS = lyr.map(::matchSource); val covS = cov.map(::matchSource)
+        val run = BatchMatchRun(songs, cfg, (meta + lyr + cov).distinctBy { it.id }.map { it.displayName })
+        matchRun = run
+        val target = app.settings.lyricsTarget
+        val sem = kotlinx.coroutines.sync.Semaphore(cfg.concurrency.coerceIn(1, 4))
+        run.job = app.scope.launch {
+            coroutineScope {
+                for (s in songs) launch {
+                    sem.acquire()
+                    try {
+                        run.inProgress += s.fileName
+                        val r = withContext(Dispatchers.IO) { matchOne(s, cfg, metaS, lyrS, covS, target) }
+                        run.results += r
+                        r.updated?.let { u -> if (MatchTarget.COVER in r.written) com.lonx.lyrico.desktop.ui.Thumbnails.invalidate(s); app.updateSong(u) }
+                    } finally {
+                        run.inProgress -= s.fileName
+                        sem.release()
+                    }
+                }
+            }
+            run.finished = true
+            app.toast("批量匹配完成：已匹配 ${run.count(MatchStatus.MATCHED)}，未匹配 ${run.count(MatchStatus.NOT_FOUND)}，跳过 ${run.count(MatchStatus.SKIPPED)}，失败 ${run.count(MatchStatus.FAILED)}")
+        }
+        run.job?.invokeOnCompletion { e -> if (e != null) app.scope.launch { run.cancelled = true; run.finished = true } }
+    }
+
+    fun stopBatchMatch() { matchRun?.job?.cancel() }
+
+    /** Blocking: matches one song and writes the result. Never clears a field. */
+    fun matchOne(s: Song, cfg: BatchMatchConfig, meta: List<MatchSource>, lyr: List<MatchSource>, cov: List<MatchSource>, target: com.lonx.lyrico.desktop.lyrics.LyricsTarget): SongMatchResult = try {
+        val live = app.songs.firstOrNull { it.id == s.id } ?: s
+        val tag = app.actions.readTags(live)
+        val (status, plan) = BatchMatcher.plan(live, tag, cfg, meta, lyr, cov, download = { repo.download(it) }, isImage = { ImageUtils.decode(it) != null || com.lonx.lyrico.desktop.tag.ImageSize.of(it) != null })
+        if (status == MatchStatus.MATCHED) {
+            val updated = app.actions.applyMatch(live, plan, target)
+            SongMatchResult(live, status, plan.detail, plan.written, updated)
+        } else SongMatchResult(live, status, plan.detail)
+    } catch (e: kotlinx.coroutines.CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        SongMatchResult(s, MatchStatus.FAILED, e.message ?: e.javaClass.simpleName)
     }
 
     /** Batch: best-scoring lyrics from the ticked enabled sources (in order) saved with the default destination. */

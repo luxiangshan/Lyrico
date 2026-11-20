@@ -7,6 +7,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.lonx.lyrico.desktop.library.BatchChange
+import com.lonx.lyrico.desktop.library.BatchCover
 import com.lonx.lyrico.desktop.library.BatchEdit
 import com.lonx.lyrico.desktop.library.BatchField
 import com.lonx.lyrico.desktop.library.EditorData
@@ -55,21 +57,28 @@ class EditorState(val data: EditorData, defaultTarget: LyricsTarget) {
     fun buildEdit() = TagEdit(fields = changedFields, cover = coverChange)
 }
 
-/** Batch editor: every field has an "apply" checkbox; only checked fields are written. */
+/**
+ * Manual batch editor. A field is written ONLY when the user changed it: typed a value that differs from the shared one
+ * (or any value into a 〈多个值〉 field), or pressed its 清空 button. Ticking alone never writes anything; the tick only
+ * includes/excludes a pending change. 全选 ticks the fields that have a pending change and clears nothing.
+ * The cover is kept unless an image was chosen or 移除封面 was pressed.
+ */
 class BatchState(val songs: List<Song>) {
     val checked = mutableStateMapOf<BatchField, Boolean>()
     val values = mutableStateMapOf<BatchField, String>()
     /** true = the songs have different values (or not all could be read): placeholder 〈多个值〉. */
     val mixed = mutableStateMapOf<BatchField, Boolean>()
+    /** Shared value each field had when loaded ("" for 〈多个值〉), to tell a real edit from the initial text. */
+    private val original = mutableStateMapOf<BatchField, String>()
+    /** Fields the user explicitly asked to clear with the 清空 button. */
+    val clearing = mutableStateMapOf<BatchField, Boolean>()
     private val touched = HashSet<BatchField>()
-    /** Image chosen for the cover; null with COVER checked = remove covers. */
-    var cover by mutableStateOf<CoverArt?>(null)
-    var coverFileName by mutableStateOf<String?>(null)
+    var cover by mutableStateOf<BatchCover>(BatchCover.Keep)
     /** Songs that currently have a cover (from the library index). */
     val withCover: Int = songs.count { it.hasCover }
     var tagsLoaded by mutableStateOf(false)
-    /** Fields that would be cleared, waiting for confirmation. */
-    var confirmClear by mutableStateOf<List<BatchField>?>(null)
+    /** Change summary waiting for confirmation (null = no dialog). */
+    var confirm by mutableStateOf<List<String>?>(null)
 
     init {
         val index = BatchEdit.fromIndex(songs)
@@ -77,6 +86,7 @@ class BatchState(val songs: List<Song>) {
             checked[f] = false
             if (!f.isText) continue
             values[f] = index[f].orEmpty()
+            original[f] = index[f].orEmpty()
             mixed[f] = f !in index || index[f] == null
         }
     }
@@ -84,6 +94,7 @@ class BatchState(val songs: List<Song>) {
     /** Fills shared values read from the tags, leaving fields the user already edited alone. */
     fun applyShared(shared: Map<BatchField, String?>) {
         for ((f, v) in shared) {
+            original[f] = v.orEmpty()
             if (f in touched) continue
             values[f] = v.orEmpty()
             mixed[f] = v == null
@@ -91,31 +102,62 @@ class BatchState(val songs: List<Song>) {
         tagsLoaded = true
     }
 
+    /** The user typed in a field: it becomes a pending change (and is ticked) only if the text really differs. */
     fun setValue(f: BatchField, v: String) {
         values[f] = v
         touched += f
-        checked[f] = true
+        clearing[f] = false
+        checked[f] = isEdited(f)
     }
 
-    fun setCoverImage(art: CoverArt, name: String?) {
-        cover = art; coverFileName = name; checked[BatchField.COVER] = true
+    /** 清空 button: explicitly clear this field on every selected song. Pressing it again undoes it. */
+    fun toggleClear(f: BatchField) {
+        val on = clearing[f] != true
+        clearing[f] = on
+        if (on) { values[f] = ""; touched += f } else { values[f] = original[f].orEmpty(); touched -= f }
+        checked[f] = hasChange(f)
     }
 
-    fun setRemoveCover() {
-        cover = null; coverFileName = null; checked[BatchField.COVER] = true
+    /** A non-empty value that differs from what the songs share (any non-empty value for 〈多个值〉). */
+    fun isEdited(f: BatchField): Boolean {
+        val v = values[f].orEmpty()
+        return f in touched && v.isNotBlank() && (mixed[f] == true || v.trim() != original[f].orEmpty().trim())
     }
 
-    val checkedSet: Set<BatchField> get() = BatchField.entries.filter { checked[it] == true }.toSet()
-    val allChecked: Boolean get() = BatchField.entries.all { checked[it] == true }
+    fun hasChange(f: BatchField): Boolean = when (f) {
+        BatchField.COVER -> cover != BatchCover.Keep
+        else -> clearing[f] == true || isEdited(f)
+    }
 
-    /** 全选 / 全不选. */
+    fun setCoverImage(art: CoverArt, name: String?) { cover = BatchCover.Replace(art, name); checked[BatchField.COVER] = true }
+    fun setRemoveCover() { cover = BatchCover.Remove; checked[BatchField.COVER] = true }
+    fun keepCover() { cover = BatchCover.Keep; checked[BatchField.COVER] = false }
+
+    /** Ticking a field without a pending change does nothing (it is not "write empty"). */
+    fun setChecked(f: BatchField, on: Boolean) { checked[f] = on && hasChange(f) }
+
+    val pending: List<BatchField> get() = BatchField.entries.filter { hasChange(it) }
+    val checkedSet: Set<BatchField> get() = BatchField.entries.filter { checked[it] == true && hasChange(it) }.toSet()
+    val allChecked: Boolean get() = pending.isNotEmpty() && pending.all { checked[it] == true }
+
+    /** 全选 ticks every field that has a pending change; 全不选 unticks all. Never clears or writes anything by itself. */
     fun toggleAll() {
         val v = !allChecked
-        BatchField.entries.forEach { checked[it] = v }
+        BatchField.entries.forEach { checked[it] = v && hasChange(it) }
     }
 
-    fun buildEdit(): TagEdit = BatchEdit.build(checkedSet, values.toMap(), cover)
-    fun cleared(): List<BatchField> = BatchEdit.cleared(checkedSet, values.toMap(), cover)
+    fun changes(): Map<BatchField, BatchChange> {
+        val out = LinkedHashMap<BatchField, BatchChange>()
+        for (f in checkedSet) {
+            if (f == BatchField.COVER) continue
+            out[f] = if (clearing[f] == true) BatchChange.Clear else BatchChange.SetValue(values[f].orEmpty())
+        }
+        return out
+    }
+
+    private fun coverAction(): BatchCover = if (BatchField.COVER in checkedSet) cover else BatchCover.Keep
+    fun buildEdit(): TagEdit = BatchEdit.build(changes(), coverAction())
+    fun describe(): List<String> = BatchEdit.describe(changes(), coverAction())
 }
 
 class BatchSummary(val title: String, val counts: Map<String, Int>, val failures: List<String>)
@@ -291,6 +333,7 @@ class AppState(val scope: CoroutineScope, pluginDir: File? = null) {
     private fun openBatch(ids: Set<String>) {
         val b = BatchState(songs.filter { it.id in ids })
         batch = b
+        plugins.syncMatchSelection()
         batchLoadJob?.cancel()
         batchLoadJob = scope.launch {
             val tags = withContext(Dispatchers.IO) {
@@ -425,13 +468,13 @@ class AppState(val scope: CoroutineScope, pluginDir: File? = null) {
         }
     }
 
-    /** Writes the checked batch fields; asks first when some of them would be cleared. */
+    /** Writes the batch changes after the user confirmed the list of what will change. */
     fun applyBatch(confirmed: Boolean = false) {
         val b = batch ?: return
         val edit = b.buildEdit()
-        if (edit.isEmpty) { toast("请先勾选要修改的字段"); return }
-        if (!confirmed && b.cleared().isNotEmpty()) { b.confirmClear = b.cleared(); return }
-        b.confirmClear = null
+        if (edit.isEmpty) { toast("没有要修改的字段：先在字段中输入新值，或点「清空」/选择封面"); return }
+        if (!confirmed) { b.confirm = b.describe(); return }
+        b.confirm = null
         val coverTouched = edit.cover != CoverChange.Keep
         runBatch("批量修改", b.songs.mapNotNull { s -> songs.firstOrNull { it.id == s.id } }) { s ->
             val updated = actions.applyEdit(s, edit)

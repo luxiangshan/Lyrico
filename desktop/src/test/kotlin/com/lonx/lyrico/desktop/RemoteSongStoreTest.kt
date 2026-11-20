@@ -30,6 +30,8 @@ import kotlin.test.assertTrue
 
 /** In-memory remote with flat paths. */
 class FakeRemote(var rejectUploads: Boolean = false) : RemoteStorage {
+    /** Simulates a dropped connection: full reads stop after this many bytes (the stream just ends). */
+    var truncateReadsAt: Int? = null
     val files = LinkedHashMap<String, ByteArray>()
     val mtimes = HashMap<String, Long>()
     var clock = 1000L
@@ -48,7 +50,7 @@ class FakeRemote(var rejectUploads: Boolean = false) : RemoteStorage {
         return out
     }
     override fun stat(path: String) = files[path]?.let { RemoteEntry(path, path.substringAfterLast('/'), false, it.size.toLong(), mtimes[path] ?: 0) }
-    override fun openRead(path: String): InputStream { fullReads++; return ByteArrayInputStream(files[path] ?: throw IOException("HTTP 404")) }
+    override fun openRead(path: String): InputStream { fullReads++; val b = files[path] ?: throw IOException("HTTP 404"); return ByteArrayInputStream(truncateReadsAt?.let { b.copyOf(minOf(it, b.size)) } ?: b) }
     override fun openRange(path: String, offset: Long, length: Long): InputStream {
         rangeReads++
         val b = files[path]!!

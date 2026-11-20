@@ -91,6 +91,31 @@ class SongActions(private val settings: () -> AppSettings, private val storeFor:
         return store.refreshStat(song.withTag(TagService.read(file, false)), file)
     }
 
+    /** Reads the current tags of a song (remote songs are downloaded first). */
+    fun readTags(song: Song): TagData = TagService.read(storeFor(song).fileFor(song), withCover = false)
+
+    /**
+     * Writes a batch-match result: tag fields and cover in one write; lyrics into the tag and/or a .lrc per [target].
+     * Only non-empty values are ever written (the plan never contains clears).
+     */
+    fun applyMatch(song: Song, plan: com.lonx.lyrico.desktop.plugin.MatchPlan, target: LyricsTarget): Song {
+        val store = storeFor(song)
+        var updated = song
+        val edit = plan.tagEdit(withLyrics = target.writesTag)
+        if (!edit.isEmpty) {
+            val file = store.fileFor(song)
+            TagService.write(file, edit, settings().tagOptions)
+            store.commit(song, file)
+            updated = store.refreshStat(song.withTag(TagService.read(file, false)), file)
+        }
+        val lyrics = plan.lyrics
+        if (lyrics != null && target.writesLrc) {
+            store.writeLrc(song, LrcFiles.normalize(lyrics), settings().lrcOptions)
+            updated = updated.copy(hasLrc = true)
+        }
+        return updated
+    }
+
     /**
      * Exports lyrics of [song] to a .lrc following [plan]: the tag lyrics, or [lyricsOverride] (the editor's text).
      * With a plan directory the file is written there locally (also for remote songs); otherwise next to the song.

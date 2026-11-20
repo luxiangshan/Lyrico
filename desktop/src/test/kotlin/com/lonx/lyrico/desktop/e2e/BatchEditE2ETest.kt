@@ -1,6 +1,8 @@
 package com.lonx.lyrico.desktop.e2e
 
 import com.lonx.lyrico.desktop.FakeRemote
+import com.lonx.lyrico.desktop.library.BatchChange
+import com.lonx.lyrico.desktop.library.BatchCover
 import com.lonx.lyrico.desktop.library.BatchEdit
 import com.lonx.lyrico.desktop.library.BatchField
 import com.lonx.lyrico.desktop.library.LibraryScanner
@@ -54,7 +56,7 @@ class BatchEditE2ETest {
             val a = art(img)
             assertEquals(mime, a.mime)
             assertNotNull(ImageUtils.decode(a.bytes), "$img must decode (the batch editor validates images)")
-            val edit = BatchEdit.build(setOf(BatchField.COVER), emptyMap(), a)
+            val edit = BatchEdit.build(emptyMap(), BatchCover.Replace(a, img))
             val updated = songs.map { actions.applyEdit(it, edit) }
             for (s in updated) {
                 val t = TagService.read(File(s.path), withCover = true)
@@ -66,7 +68,7 @@ class BatchEditE2ETest {
             }
             E2E.report("batch-cover", "$img -> ${updated.size} files (${E2E.formats.joinToString()}): cover bytes read back identical on ${E2E.os}")
         }
-        val removed = songs.map { actions.applyEdit(it, BatchEdit.build(setOf(BatchField.COVER), emptyMap(), null)) }
+        val removed = songs.map { actions.applyEdit(it, BatchEdit.build(emptyMap(), BatchCover.Remove)) }
         for (s in removed) {
             val t = TagService.read(File(s.path), withCover = true)
             assertNull(t.cover, s.fileName)
@@ -85,7 +87,7 @@ class BatchEditE2ETest {
         val songs = remote.list("/云盘/专辑").filter { !it.isDirectory }.map { RemoteScanner.songFor("r1", it, false) }
         val webp = art("cover.webp")
         val before = remote.files.mapValues { it.value.copyOf() }
-        songs.forEach { remoteActions.applyEdit(it, BatchEdit.build(setOf(BatchField.COVER, BatchField.ALBUM), mapOf(BatchField.ALBUM to "远程专辑"), webp)) }
+        songs.forEach { remoteActions.applyEdit(it, BatchEdit.build(mapOf(BatchField.ALBUM to BatchChange.SetValue("远程专辑")), BatchCover.Replace(webp, "cover.webp"))) }
         for (s in songs) {
             val bytes = remote.files[s.path]!!
             assertFalse(bytes.contentEquals(before[s.path]), "${s.fileName} was uploaded")
@@ -98,22 +100,22 @@ class BatchEditE2ETest {
     }
 
     @Test
-    fun batchFieldsOnlyTickedAreWrittenAndTickedEmptyClears() {
+    fun batchFieldsOnlyChangedAreWrittenEmptyNeverClearsExplicitClearDoes() {
         val songs = library()
-        val values = mapOf(
-            BatchField.ARTIST to "统一歌手",
-            BatchField.ALBUM to "不应写入的专辑", // typed but NOT ticked
-            BatchField.GENRE to "", // ticked + empty = clear
-            BatchField.TRACK to "7",
-            BatchField.YEAR to "2024",
-            BatchField.LYRICS to "[00:01.00]批量歌词",
-            BatchField.COMMENT to "",
+        val changes = mapOf(
+            BatchField.ARTIST to BatchChange.SetValue("统一歌手"),
+            BatchField.GENRE to BatchChange.Clear, // explicit 清空
+            BatchField.TRACK to BatchChange.SetValue("7"),
+            BatchField.YEAR to BatchChange.SetValue("2024"),
+            BatchField.LYRICS to BatchChange.SetValue("[00:01.00]批量歌词"),
+            BatchField.COMMENT to BatchChange.SetValue("   "), // empty text is NOT a clear
         )
-        val checked = setOf(BatchField.ARTIST, BatchField.GENRE, BatchField.TRACK, BatchField.YEAR, BatchField.LYRICS)
-        assertEquals(listOf(BatchField.GENRE), BatchEdit.cleared(checked, values, null))
-        val edit = BatchEdit.build(checked, values, null)
+        val edit = BatchEdit.build(changes, BatchCover.Keep)
         assertFalse(TagField.ALBUM in edit.fields)
-        assertFalse(TagField.COMMENT in edit.fields)
+        assertFalse(TagField.COMMENT in edit.fields, "empty text must never clear")
+        assertEquals("", edit.fields[TagField.GENRE])
+        assertEquals(com.lonx.lyrico.desktop.tag.CoverChange.Keep, edit.cover)
+        assertEquals(listOf("艺术家 → 「统一歌手」", "音轨号 → 「7」", "年份 → 「2024」", "流派 → 清除", "歌词 → 「1 行歌词」"), BatchEdit.describe(changes, BatchCover.Keep))
         for (s in songs) actions.applyEdit(s, edit)
         val tags = songs.map { TagService.read(File(it.path)) }
         for ((s, t) in songs.zip(tags)) {
@@ -123,9 +125,9 @@ class BatchEditE2ETest {
             assertEquals("7", t[TagField.TRACK], s.fileName)
             assertEquals("2024", t[TagField.YEAR], s.fileName)
             assertEquals("[00:01.00]批量歌词", t.lyrics, s.fileName)
-            assertEquals("同一张专辑", t[TagField.ALBUM], "${s.fileName} unticked album kept")
-            assertEquals("标题 $i", t[TagField.TITLE], "${s.fileName} unticked title kept")
-            assertEquals("注释 $i", t[TagField.COMMENT], "${s.fileName} unticked comment kept")
+            assertEquals("同一张专辑", t[TagField.ALBUM], "${s.fileName} unchanged album kept")
+            assertEquals("标题 $i", t[TagField.TITLE], "${s.fileName} unchanged title kept")
+            assertEquals("注释 $i", t[TagField.COMMENT], "${s.fileName} blank-text comment kept")
         }
         // shared values / 〈多个值〉 detection
         val shared = BatchEdit.shared(tags)
@@ -134,6 +136,6 @@ class BatchEditE2ETest {
         assertNull(shared[BatchField.TITLE]) // differs -> 〈多个值〉
         assertNull(shared[BatchField.COMMENT])
         assertEquals("[00:01.00]批量歌词", shared[BatchField.LYRICS])
-        E2E.report("batch-fields", "${songs.size} files (${E2E.formats.joinToString()}): ticked artist/track/year/lyrics written, ticked-empty genre cleared, unticked album/title/comment kept")
+        E2E.report("batch-fields", "${songs.size} files (${E2E.formats.joinToString()}): changed artist/track/year/lyrics written, explicit 清空 genre cleared, blank-text comment and unchanged album/title kept")
     }
 }

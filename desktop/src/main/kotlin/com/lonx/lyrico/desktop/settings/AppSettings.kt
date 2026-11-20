@@ -32,7 +32,15 @@ data class AppSettings(
     val pluginWordByWord: Boolean = false,
     val pluginCatalogUrl: String = "https://github.com/Replica0110/Lyrico-Plugins/releases/latest/download/catalog.json",
     val batchSkipExistingLyrics: Boolean = true,
+    /** 批量匹配: fields to fill, write mode, 优先按文件名匹配, songs processed at once (1–4). Android defaults. */
+    val batchMatchTargets: List<com.lonx.lyrico.desktop.plugin.MatchTarget> = com.lonx.lyrico.desktop.plugin.MatchTarget.defaults.sortedBy { it.ordinal },
+    val batchMatchMode: com.lonx.lyrico.desktop.plugin.MatchWriteMode = com.lonx.lyrico.desktop.plugin.MatchWriteMode.SUPPLEMENT,
+    val batchMatchPreferFileName: Boolean = false,
+    val batchMatchConcurrency: Int = 3,
 ) {
+    val batchMatchConfig get() = com.lonx.lyrico.desktop.plugin.BatchMatchConfig(
+        batchMatchTargets.toSet(), batchMatchMode, batchMatchPreferFileName, batchMatchConcurrency.coerceIn(1, 4),
+    )
     val tagOptions get() = TagWriteOptions(id3Version = id3Version, usltLanguage = usltLanguage)
     val lrcOptions get() = LrcWriteOptions(bom = lrcBom, lineEnding = lrcLineEnding)
 }

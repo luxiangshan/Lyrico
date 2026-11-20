@@ -7,7 +7,7 @@ import com.lonx.lyrico.desktop.tag.TagData
 import com.lonx.lyrico.desktop.tag.TagEdit
 import com.lonx.lyrico.desktop.tag.TagField
 
-/** Fields of the batch editor, in display order. Each one has its own "apply" checkbox. */
+/** Fields of the batch editor, in display order. */
 enum class BatchField(val label: String, val tag: TagField?) {
     TITLE("标题", TagField.TITLE),
     ARTIST("艺术家", TagField.ARTIST),
@@ -28,27 +28,67 @@ enum class BatchField(val label: String, val tag: TagField?) {
     val isText get() = this != COVER
 }
 
+/** What the batch editor will do to one field. Fields without a change are never written. */
+sealed interface BatchChange {
+    /** Write this (non-empty) value to every selected song. */
+    data class SetValue(val value: String) : BatchChange
+    /** Remove the field from every selected song (only via the explicit 清空 button). */
+    data object Clear : BatchChange
+}
+
+/** Cover action of the batch editor: Keep unless an image was chosen or 移除封面 was pressed. */
+sealed interface BatchCover {
+    data object Keep : BatchCover
+    class Replace(val art: CoverArt, val name: String?) : BatchCover
+    data object Remove : BatchCover
+}
+
 object BatchEdit {
     /**
-     * Only [checked] fields are written. A checked text field that is empty deletes that tag; a checked cover
-     * with no image ([cover] null) removes the cover. Lyrics go into the tag (not into .lrc files).
+     * Builds the edit from the fields the user actually changed. A field missing from [changes] is not touched, so every
+     * song keeps its own value; an empty text is never treated as "clear" (only [BatchChange.Clear] clears).
+     * Lyrics go into the tag (not into .lrc files).
      */
-    fun build(checked: Set<BatchField>, values: Map<BatchField, String>, cover: CoverArt?): TagEdit {
-        val fields = checked.mapNotNull { f -> f.tag?.let { it to values[f].orEmpty().trim() } }.toMap()
-        val lyrics = if (BatchField.LYRICS in checked) LrcFiles.normalize(values[BatchField.LYRICS].orEmpty()).trimEnd() else null
-        val coverChange = when {
-            BatchField.COVER !in checked -> CoverChange.Keep
-            cover != null -> CoverChange.Replace(cover)
-            else -> CoverChange.Remove
+    fun build(changes: Map<BatchField, BatchChange>, cover: BatchCover): TagEdit {
+        val fields = LinkedHashMap<TagField, String>()
+        var lyrics: String? = null
+        for ((f, c) in changes) {
+            if (f == BatchField.COVER) continue
+            val value = when (c) {
+                BatchChange.Clear -> ""
+                is BatchChange.SetValue -> c.value.trim().ifEmpty { null } ?: continue // empty text = no change
+            }
+            if (f == BatchField.LYRICS) lyrics = if (value.isEmpty()) "" else LrcFiles.normalize(value).trimEnd()
+            else fields[f.tag!!] = value
+        }
+        val coverChange = when (cover) {
+            BatchCover.Keep -> CoverChange.Keep
+            BatchCover.Remove -> CoverChange.Remove
+            is BatchCover.Replace -> CoverChange.Replace(cover.art)
         }
         return TagEdit(fields, lyrics, coverChange)
     }
 
-    /** Checked fields that will be cleared (empty value / no image). */
-    fun cleared(checked: Set<BatchField>, values: Map<BatchField, String>, cover: CoverArt?): List<BatchField> =
-        BatchField.entries.filter { f ->
-            f in checked && if (f == BatchField.COVER) cover == null else values[f].orEmpty().isBlank()
+    /** One line per change for the confirmation dialog, e.g. "专辑 → 「叶惠美」", "流派 → 清除". */
+    fun describe(changes: Map<BatchField, BatchChange>, cover: BatchCover): List<String> {
+        val out = ArrayList<String>()
+        for (f in BatchField.entries) {
+            if (f == BatchField.COVER) continue
+            when (val c = changes[f]) {
+                BatchChange.Clear -> out += "${f.label} → 清除"
+                is BatchChange.SetValue -> c.value.trim().takeIf { it.isNotEmpty() }?.let { v ->
+                    out += "${f.label} → 「${if (f == BatchField.LYRICS) "${v.lines().size} 行歌词" else v.take(60)}」"
+                }
+                null -> Unit
+            }
         }
+        when (cover) {
+            BatchCover.Keep -> Unit
+            BatchCover.Remove -> out += "封面 → 移除"
+            is BatchCover.Replace -> out += "封面 → 替换为「${cover.name ?: "所选图片"}」"
+        }
+        return out
+    }
 
     /** Value shared by every song, or null when they differ or a song could not be read. */
     fun shared(tags: List<TagData?>): Map<BatchField, String?> {

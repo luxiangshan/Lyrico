@@ -65,6 +65,9 @@ class VorbisComments(var vendor: String = "Lyrico Mod", val entries: MutableList
             return Base64.getEncoder().encodeToString(out.toByteArray())
         }
 
+        /** Picture type of a METADATA_BLOCK_PICTURE value (3 = front cover), or -1 when unreadable. */
+        fun pictureType(b64: String): Int = try { ByteBuffer.wrap(Base64.getMimeDecoder().decode(b64)).int } catch (_: Exception) { -1 }
+
         fun decodePicture(b64: String): CoverArt? = try {
             val bb = ByteBuffer.wrap(Base64.getMimeDecoder().decode(b64))
             bb.int
@@ -123,7 +126,11 @@ class VorbisComments(var vendor: String = "Lyrico Mod", val entries: MutableList
 
     fun lyrics(): String = first("LYRICS").ifEmpty { first("UNSYNCEDLYRICS") }
 
-    fun cover(): CoverArt? = first("METADATA_BLOCK_PICTURE").takeIf { it.isNotEmpty() }?.let { decodePicture(it) }
+    /** The front cover (type 3), else the first picture. */
+    fun cover(): CoverArt? {
+        val all = all("METADATA_BLOCK_PICTURE").filter { it.isNotEmpty() }
+        return (all.firstOrNull { pictureType(it) == 3 } ?: all.firstOrNull())?.let { decodePicture(it) }
+    }
 
     fun hasCover(): Boolean = first("METADATA_BLOCK_PICTURE").isNotEmpty()
 
@@ -144,8 +151,12 @@ class VorbisComments(var vendor: String = "Lyrico Mod", val entries: MutableList
             CoverChange.Keep -> Unit
             CoverChange.Remove -> { remove("METADATA_BLOCK_PICTURE"); remove("COVERART"); remove("COVERARTMIME") }
             is CoverChange.Replace -> {
+                // Only the front cover is replaced; other pictures (back cover, artist…) are kept after it.
                 remove("COVERART"); remove("COVERARTMIME")
+                val others = all("METADATA_BLOCK_PICTURE").filter { pictureType(it) != 3 }
                 set("METADATA_BLOCK_PICTURE", encodePicture(c.art))
+                val at = entries.indexOfFirst { it.first.equals("METADATA_BLOCK_PICTURE", true) }
+                others.forEachIndexed { i, v -> entries.add(at + 1 + i, "METADATA_BLOCK_PICTURE" to v) }
             }
         }
     }

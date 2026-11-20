@@ -61,20 +61,23 @@ object SelfTest {
             }
             // 1x1 lossless WebP
             val webp = java.util.Base64.getDecoder().decode("UklGRhoAAABXRUJQVlA4TA0AAAAvAAAAEAcQERGIiP4HAA==")
+            files.forEach { TagService.write(it, com.lonx.lyrico.desktop.tag.TagEdit(mapOf(com.lonx.lyrico.desktop.tag.TagField.TITLE to "晴天", com.lonx.lyrico.desktop.tag.TagField.ARTIST to "周杰伦"))) }
             val edit = com.lonx.lyrico.desktop.library.BatchEdit.build(
-                setOf(com.lonx.lyrico.desktop.library.BatchField.COVER, com.lonx.lyrico.desktop.library.BatchField.LYRICS),
-                mapOf(com.lonx.lyrico.desktop.library.BatchField.LYRICS to "[00:01.00]批量"), com.lonx.lyrico.desktop.tag.CoverArt(webp, "image/webp"))
+                mapOf(com.lonx.lyrico.desktop.library.BatchField.LYRICS to com.lonx.lyrico.desktop.library.BatchChange.SetValue("[00:01.00]批量"),
+                    com.lonx.lyrico.desktop.library.BatchField.ALBUM to com.lonx.lyrico.desktop.library.BatchChange.SetValue("")), // empty text = no change
+                com.lonx.lyrico.desktop.library.BatchCover.Replace(com.lonx.lyrico.desktop.tag.CoverArt(webp, "image/webp"), "1x1.webp"))
             files.forEach { TagService.write(it, edit) }
             files.forEach { f ->
                 val t = TagService.read(f, withCover = true)
                 require(t.cover?.bytes?.contentEquals(webp) == true && t.lyrics == "[00:01.00]批量") { "${f.name}: cover=${t.cover?.mime} lyrics=${t.lyrics}" }
+                require(t[com.lonx.lyrico.desktop.tag.TagField.TITLE] == "晴天" && t[com.lonx.lyrico.desktop.tag.TagField.ARTIST] == "周杰伦") { "${f.name}: untouched fields lost: ${t.fields}" }
             }
             val out = File(dir, "导出").apply { mkdirs() }
             val plan = com.lonx.lyrico.desktop.lyrics.LrcExportPlan(out, com.lonx.lyrico.desktop.lyrics.LrcConflict.NUMBER)
             files.forEach { f -> LrcFiles.write(plan.resolve(f.nameWithoutExtension)!!.file, TagService.read(f).lyrics, LrcWriteOptions()) }
             val names = out.list()!!.sorted()
             require(names == listOf("晴天 (2).lrc", "晴天.lrc")) { names.toString() }
-            "wav+aiff webp cover ok, export $names"
+            "wav+aiff webp cover ok, untouched title/artist kept, export $names"
         }
         check("tls-modules") { javax.net.ssl.SSLContext.getDefault().protocol }
         dir.deleteRecursively()
