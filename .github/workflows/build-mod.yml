@@ -4,7 +4,8 @@ name: 🏗️ 构建 Lyrico Mod APK
 # 使用仓库内置的 lyrico-app/mod-debug.keystore 签名（固定密钥，后续构建可直接覆盖安装）。
 on:
   push:
-    branches: [ remote-storage ]
+    branches: [ master, remote-storage ]
+    tags: [ 'v*-mod' ]
   workflow_dispatch:
 
 concurrency:
@@ -79,7 +80,23 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      # 推送 v*-mod 标签：把正式版 APK 上传到该标签的正式 Release（不存在则创建）。
+      - name: 🚀 上传到正式 Release（标签）
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          files=$(ls lyrico-app/build/outputs/apk/release/*.apk 2>/dev/null || true)
+          if [[ -z "$files" ]]; then echo "::error::正式版 APK 构建失败，标签发布不接受 Debug 备用包"; exit 1; fi
+          bash .github/scripts/ensure-release.sh "$tag"
+          gh release upload "$tag" $files --repo "$GITHUB_REPOSITORY" --clobber
+
+      # 推送到 remote-storage 分支：沿用旧的按提交预发布（master 只上传 Artifact，不再刷预发布）。
       - name: 🚀 发布到 Release（预发布）
+        if: github.ref == 'refs/heads/remote-storage'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash

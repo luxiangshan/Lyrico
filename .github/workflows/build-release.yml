@@ -23,6 +23,8 @@ concurrency:
 jobs:
   build:
     name: 🏗️ 构建 Release APK
+    # 本 Fork（Lyrico Mod）没有原版签名 Secrets，只在上游仓库运行；Mod 构建见 build-mod.yml。
+    if: github.repository == 'Replica0110/Lyrico'
     runs-on: ubuntu-latest
     environment: release
     env:

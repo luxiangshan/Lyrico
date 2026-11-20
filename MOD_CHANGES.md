@@ -1,6 +1,8 @@
 # Lyrico Mod：远程存储版改动说明
 
-分支：`remote-storage`。本 Mod 以独立包名 `com.lonx.lyrico.mod`（应用名 “Lyrico Mod”）安装，可与原版 Lyrico 共存；Debug 构建为 `com.lonx.lyrico.mod.debug`。
+本文件为 Android 版改动说明（最初在分支 `remote-storage` 开发，已合并到 `master`）。iOS 版代码在 `ios/`，Windows 版在 `desktop/`（说明见 `desktop/RELEASE_NOTES.md`）；三端正式版发布说明见根目录 `RELEASE_NOTES.md`。
+
+本 Mod 以独立包名 `com.lonx.lyrico.mod`（应用名 “Lyrico Mod”）安装，可与原版 Lyrico 共存；Debug 构建为 `com.lonx.lyrico.mod.debug`。
 
 ## 新功能
 
@@ -58,7 +60,7 @@
 - 本次修改未在真机上测试。
 
 ## 构建
-- GitHub Actions：`.github/workflows/build-mod.yml`，推送到 `remote-storage` 或手动运行（workflow_dispatch）即可，**无需任何仓库 Secrets**。
+- GitHub Actions：`.github/workflows/build-mod.yml`，推送到 `master` / `remote-storage`、推送 `v*-mod` 标签（上传到同名正式 Release）或手动运行（workflow_dispatch）即可，**无需任何仓库 Secrets**。
   - 检出子模块（taglib / quickjs-ng / ffmpeg）、JDK 21、安装 NDK `29.0.14206865`（及 CMake 4.1.2）。
   - 先构建 Release（R8 + 内置 mod 密钥签名）；若失败自动退回构建 Debug。
   - 产物 Artifact 名为 **Lyrico-Mod**（按 ABI 拆分：arm64-v8a / armeabi-v7a）。

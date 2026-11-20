@@ -4,7 +4,8 @@ name: 🍎 构建 Lyrico Mod iOS（未签名 IPA）
 # 安装：TrollStore 直接安装，或 全能签 等工具自签。无需任何仓库 Secrets。
 on:
   push:
-    branches: [ ios ]
+    branches: [ master, ios ]
+    tags: [ 'v*-mod' ]
   workflow_dispatch:
 
 concurrency:
@@ -100,7 +101,21 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      - name: 🚀 上传到正式 Release（标签）
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          src="${{ steps.ipa.outputs.path }}"
+          dst="$(dirname "$src")/$(basename "$src" .ipa)-ios-unsigned.ipa"
+          cp "$src" "$dst"
+          bash .github/scripts/ensure-release.sh "$tag"
+          gh release upload "$tag" "$dst" --repo "$GITHUB_REPOSITORY" --clobber
+
       - name: 🚀 发布到 Release（预发布）
+        if: github.ref == 'refs/heads/ios'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

@@ -19,6 +19,8 @@ concurrency:
 
 jobs:
   build:
+    # 文档站点（GitHub Pages）只在上游仓库部署。
+    if: github.repository == 'Replica0110/Lyrico'
     runs-on: ubuntu-latest
     steps:
       - name: 📥 检出代码

@@ -2,7 +2,8 @@ name: Build Windows (Lyrico Mod Desktop)
 
 on:
   push:
-    branches: [ windows ]
+    branches: [ master, windows ]
+    tags: [ 'v*-mod' ]
   workflow_dispatch:
 
 concurrency:
@@ -89,7 +90,20 @@ jobs:
           path: dist/*
           if-no-files-found: error
 
+      - name: Upload to formal release (tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        working-directory: ${{ github.workspace }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          bash .github/scripts/ensure-release.sh "$tag"
+          gh release upload "$tag" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+
       - name: Publish prerelease
+        if: github.ref == 'refs/heads/windows'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

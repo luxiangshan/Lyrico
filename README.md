@@ -1,4 +1,32 @@
-# Lyrico
+# Lyrico Mod
+
+> **这是 [Replica0110/Lyrico](https://github.com/Replica0110/Lyrico) 的非官方修改版（Fork）**，在原版基础上增加远程文件夹，并新增 iOS 版与 Windows 版。原版说明见下方「Lyrico（原版说明）」。
+
+**下载：[最新正式版 Release](https://github.com/luxiangshan/Lyrico/releases/latest)**（Android APK、iOS 未签名 IPA、Windows 便携 ZIP / MSI）
+
+| 平台 | 代码位置 | 说明 |
+|---|---|---|
+| Android 9+ | `lyrico-app/` | 原版 + 远程文件夹；独立包名 `com.lonx.lyrico.mod`，可与原版共存 |
+| iOS / iPadOS 16+ | `ios/` | SwiftUI 原生重写（TagLib），未签名 IPA，用 TrollStore 或全能签安装 |
+| Windows 10/11 x64 | `desktop/` | Compose Desktop（jaudiotagger），自带 Java 运行环境，便携 ZIP 或 MSI |
+
+主要新增：
+
+- **远程文件夹**（三端）：WebDAV、OpenList/Alist、SMB、115网盘；按需分块读取标签，编辑后上传覆盖。
+- **插件**（三端通用原版 JS 插件）：搜索歌曲信息、歌词、封面，批量匹配（补充 / 覆盖）。
+- **Windows**：歌词写入标签（MP3 为 ID3 USLT）、另存 .lrc 或两者都要；手动批量编辑（逐字段勾选）、批量封面、LRC 导出到指定目录。
+
+各平台功能、安装方法和已知限制见 [Release 说明](https://github.com/luxiangshan/Lyrico/releases/latest)、[MOD_CHANGES.md](./MOD_CHANGES.md)（Android）、[desktop/RELEASE_NOTES.md](./desktop/RELEASE_NOTES.md)（Windows）。
+
+> 远程存储未在真实服务器上完整验证，iOS 版未在真机测试；修改标签前请备份音乐文件。本 Mod 的问题请勿反馈到上游仓库。
+
+**构建**：全部由 GitHub Actions 完成，无需仓库 Secrets——`build-mod.yml`（Android APK，仓库内置 Mod 密钥签名）、`build-ios.yml`（macOS 构建未签名 IPA）、`build-windows.yml`（windows-latest 测试并打包 ZIP + MSI）。推送到 `master` 时构建并上传 Artifact；推送 `v*-mod` 标签时三个工作流把安装包上传到同名正式 Release（说明取自 `RELEASE_NOTES.md`）。原版的 `build-release.yml`、`deploy-docs.yml` 需要上游签名与 Pages 配置，在本 Fork 中自动跳过。
+
+**许可与致谢**：基于 [Replica0110/Lyrico](https://github.com/Replica0110/Lyrico)，沿用其 [Apache License 2.0](./LICENSE)；第三方组件见 [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md)。感谢原作者及贡献者。
+
+---
+
+# Lyrico（原版说明）
 
 [![GitHub Release](https://img.shields.io/github/v/release/replica0110/lyrico?style=flat-square)](https://github.com/Replica0110/Lyrico/releases)
 ![GitHub Downloads (all assets, all releases)](https://img.shields.io/github/downloads/replica0110/lyrico/total?style=flat-square)
