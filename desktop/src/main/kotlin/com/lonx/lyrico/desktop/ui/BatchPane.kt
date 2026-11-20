@@ -1,6 +1,13 @@
 package com.lonx.lyrico.desktop.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,7 +33,10 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.FilterChip
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -35,12 +45,17 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -66,6 +81,7 @@ fun BatchPane(state: AppState) {
             HorizontalDivider()
             Spacer(Modifier.height(12.dp))
             ManualBatchEdit(state, b)
+            LrcActions(state, b)
         }
         HorizontalDivider()
         Surface(tonalElevation = 2.dp) {
@@ -110,7 +126,11 @@ private fun BatchMatchCard(state: AppState, b: BatchState) {
     val running = run != null && !run.finished
     Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f))) {
         Column(Modifier.padding(14.dp)) {
-            Text("批量匹配", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            SectionHeader("批量匹配", state.batchMatchExpanded, "batch-section-match", { state.batchMatchExpanded = !state.batchMatchExpanded }) {
+                if (!state.batchMatchExpanded && running) Text("进行中 ${run.results.size} / ${run.songs.size}", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
+            }
+            AnimatedVisibility(state.batchMatchExpanded, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
+            Column(Modifier.testTag("batch-section-match-body")) {
             Text("用插件为每首歌自动查询歌曲信息、歌词和封面，选最匹配的结果写入。低于匹配阈值的歌曲跳过；结果里没有的字段不会被清空。",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(8.dp))
@@ -189,7 +209,31 @@ private fun BatchMatchCard(state: AppState, b: BatchState) {
                     }
                 }
             }
+            }
+            }
         }
+    }
+}
+
+/**
+ * Clickable section title with a chevron that rotates when expanded. [trailing] sits at the end of the row
+ * (e.g. a summary while collapsed); its own buttons keep their own clicks.
+ */
+@Composable
+private fun SectionHeader(title: String, expanded: Boolean, tag: String, onToggle: () -> Unit, large: Boolean = true, trailing: @Composable () -> Unit = {}) {
+    val angle by animateFloatAsState(if (expanded) 0f else -90f, label = "chevron")
+    Row(
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(6.dp))
+            .clickable(role = Role.Button, onClickLabel = if (expanded) "收起" else "展开", onClick = onToggle)
+            .semantics { stateDescription = if (expanded) "已展开" else "已收起" }
+            .testTag("$tag-header")
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(Icons.Default.KeyboardArrowDown, contentDescription = if (expanded) "收起" else "展开", modifier = Modifier.size(22.dp).rotate(angle))
+        Spacer(Modifier.width(6.dp))
+        Text(title, style = if (large) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+        trailing()
     }
 }
 
@@ -198,11 +242,13 @@ private fun BatchMatchCard(state: AppState, b: BatchState) {
 @Composable
 private fun ManualBatchEdit(state: AppState, b: BatchState) {
     val count = b.songs.size
-    val busy = state.busy != null
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("手动批量编辑", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-        TextButton(onClick = { b.toggleAll() }, enabled = b.pending.isNotEmpty(), modifier = Modifier.testTag("batch-toggle-all")) { Text(if (b.allChecked) "全不选" else "全选") }
+    val expanded = state.batchManualExpanded
+    SectionHeader("手动批量编辑", expanded, "batch-section-manual", { state.batchManualExpanded = !state.batchManualExpanded }, large = false) {
+        if (expanded) TextButton(onClick = { b.toggleAll() }, enabled = b.pending.isNotEmpty(), modifier = Modifier.testTag("batch-toggle-all")) { Text(if (b.allChecked) "全不选" else "全选") }
+        else if (b.pending.isNotEmpty()) Text("已修改 ${b.pending.size} 项", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary)
     }
+    AnimatedVisibility(expanded, enter = expandVertically() + fadeIn(), exit = shrinkVertically() + fadeOut()) {
+    Column(Modifier.testTag("batch-section-manual-body")) {
     Text("只写入你修改过的字段：输入新值即自动勾选；〈多个值〉的字段不输入则每首保留各自的值。要清除某个字段，请点它右侧的「清空」。全选只勾选已修改的字段，不会清除任何内容。",
         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     if (!b.tagsLoaded) Text("正在读取标签…", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
@@ -279,6 +325,15 @@ private fun ManualBatchEdit(state: AppState, b: BatchState) {
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
+    }
+    }
+}
+
+/** 歌词 / LRC actions: their own small section, always visible (not part of the collapsible manual editor). */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun LrcActions(state: AppState, b: BatchState) {
+    val busy = state.busy != null
     Spacer(Modifier.height(16.dp))
     HorizontalDivider()
     Spacer(Modifier.height(12.dp))

@@ -1,6 +1,10 @@
 package com.lonx.lyrico.desktop.ui
 
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.ComposeUiTest
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOff
@@ -25,7 +29,9 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import java.io.File
+import androidx.compose.ui.semantics.SemanticsProperties
 import kotlin.test.assertContentEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -51,6 +57,7 @@ class BatchPaneUiTest {
         val b = state.batch!!
         setContent { Fresh { AppTheme(false) { BatchPane(state) } } }
         awaitState("tags read") { b.tagsLoaded }
+        expandManual()
         assertTrue(onAllNodesWithText("〈多个值〉", substring = true, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
 
         // 全选 with nothing changed ticks nothing and cannot apply anything
@@ -101,6 +108,7 @@ class BatchPaneUiTest {
         val b = state.batch!!
         setContent { Fresh { AppTheme(false) { BatchPane(state) } } }
         awaitState("tags read") { b.tagsLoaded }
+        expandManual()
         onNodeWithTag("batch-field-ALBUM").assertTextContains("同一张专辑")
 
         // emptying a text field is NOT a clear
@@ -139,5 +147,89 @@ class BatchPaneUiTest {
             assertContentEquals(cover.bytes, t.cover?.bytes, ext)
         }
         E2E.report("ui", "BatchPane: emptied text != clear, 清空 button clears 流派, webp cover via 选择图片, confirm dialog lists exactly 艺术家/流派/封面; 〈多个值〉 titles and lyrics kept on ${exts.joinToString()}")
+    }
+
+    /** 手动批量编辑 starts collapsed: open it the way a user would before touching its fields. */
+    private fun ComposeUiTest.expandManual() {
+        onNodeWithTag("batch-section-manual-header").performScrollTo().performClick()
+        waitForIdle()
+        onNodeWithTag("batch-section-manual-header").assert(expandedState(true))
+    }
+
+    private fun expandedState(expanded: Boolean) =
+        SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, if (expanded) "已展开" else "已收起")
+
+    @Test
+    fun sectionsDefaultAndToggleAndSurviveSelectionChange() = runComposeUiTest {
+        val state = libraryState(tmp.root, (0..3).associate { i ->
+            "歌$i.mp3" to { f: File -> TagService.write(f, TagEdit(mapOf(TagField.TITLE to "标题$i", TagField.ALBUM to "专辑"))) }
+        })
+        val ids = state.songs.map { it.id }
+        state.select(ids.toSet())
+        awaitState("tags read") { state.batch?.tagsLoaded == true }
+        setContent { Fresh { AppTheme(false) { BatchPane(state) } } }
+        waitForIdle()
+
+        // defaults: 批量匹配 expanded, 手动批量编辑 collapsed (LRC actions stay visible)
+        onNodeWithTag("batch-section-match-header").assert(expandedState(true))
+        onNodeWithTag("batch-section-manual-header").assert(expandedState(false))
+        onNodeWithTag("match-start").assertExists()
+        onNodeWithTag("batch-section-manual-body").assertDoesNotExist()
+        onNodeWithTag("batch-field-ALBUM").assertDoesNotExist()
+        onNodeWithTag("batch-toggle-all").assertDoesNotExist()
+        onNodeWithTag("batch-export-lrc").assertExists()
+        onNodeWithTag("batch-apply").assertIsNotEnabled()
+
+        // collapse / expand 批量匹配
+        onNodeWithTag("batch-section-match-header").performClick(); waitForIdle()
+        onNodeWithTag("batch-section-match-header").assert(expandedState(false))
+        onNodeWithTag("match-start").assertDoesNotExist()
+        assertFalse(state.batchMatchExpanded)
+        onNodeWithTag("batch-section-match-header").performClick(); waitForIdle()
+        onNodeWithTag("batch-section-match-header").assert(expandedState(true))
+        onNodeWithTag("match-start").assertExists()
+
+        // expand 手动批量编辑: both open, the pane scrolls to the last field, the cover row and the LRC actions
+        expandManual()
+        onNodeWithTag("batch-field-TITLE").performScrollTo().assertIsDisplayed()
+        onNodeWithTag("batch-field-LYRICS").performScrollTo().assertIsDisplayed()
+        onNodeWithTag("batch-cover-choose").performScrollTo().assertIsDisplayed()
+        onNodeWithTag("batch-export-lrc").performScrollTo().assertIsDisplayed()
+        onNodeWithTag("match-start").performScrollTo().assertIsDisplayed()
+
+        // editing a field keeps it expanded
+        onNodeWithTag("batch-field-ALBUM").performScrollTo().performTextReplacement("新专辑")
+        waitForIdle()
+        onNodeWithTag("batch-section-manual-header").assert(expandedState(true))
+        onNodeWithTag("batch-check-ALBUM").assertIsOn()
+        onNodeWithTag("batch-apply").assertIsEnabled()
+
+        // collapsing hides the fields but keeps the pending edit (header shows it, apply still possible)
+        onNodeWithTag("batch-section-manual-header").performScrollTo().performClick(); waitForIdle()
+        onNodeWithTag("batch-field-ALBUM").assertDoesNotExist()
+        onNodeWithText("已修改 1 项").assertExists()
+        onNodeWithTag("batch-apply").assertIsEnabled()
+        assertEquals(TagEdit(mapOf(TagField.ALBUM to "新专辑")), state.batch!!.buildEdit())
+
+        // state is kept when the selection changes in this session: collapse match, open manual, reselect
+        onNodeWithTag("batch-section-match-header").performScrollTo().performClick()
+        onNodeWithTag("batch-section-manual-header").performScrollTo().performClick()
+        waitForIdle()
+        state.select(ids.take(2).toSet())
+        awaitState("new selection") { state.batch?.songs?.size == 2 && state.batch?.tagsLoaded == true }
+        onNodeWithText("已选择 2 首").assertExists()
+        onNodeWithTag("batch-section-match-header").assert(expandedState(false))
+        onNodeWithTag("batch-section-manual-header").assert(expandedState(true))
+        onNodeWithTag("batch-field-ALBUM").assertExists()
+        state.select(ids.toSet())
+        awaitState("full selection") { state.batch?.songs?.size == ids.size && state.batch?.tagsLoaded == true }
+        onNodeWithTag("batch-section-match-header").assert(expandedState(false))
+        onNodeWithTag("batch-section-manual-header").assert(expandedState(true))
+
+        // a new app start (new AppState) uses the defaults again
+        val restarted = AppState(E2E.uiScope(), File(tmp.root, "plugins"))
+        assertTrue(restarted.batchMatchExpanded, "批量匹配 expanded on start")
+        assertFalse(restarted.batchManualExpanded, "手动批量编辑 collapsed on start")
+        E2E.report("ui", "BatchPane sections (${E2E.os}): defaults 批量匹配 expanded / 手动批量编辑 collapsed; header toggles both; both expanded scroll to lyrics/cover/LRC; edit keeps manual open and survives collapse; state kept across selection changes; new AppState -> defaults")
     }
 }

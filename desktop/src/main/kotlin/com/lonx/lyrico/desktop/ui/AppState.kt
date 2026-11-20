@@ -188,6 +188,12 @@ class AppState(val scope: CoroutineScope, pluginDir: File? = null) {
     var editorError by mutableStateOf<String?>(null)
     var batch by mutableStateOf<BatchState?>(null)
         private set
+    /**
+     * Expanded/collapsed state of the two batch-pane sections. Kept here (not in BatchState) so it survives selection
+     * changes for the rest of the session; never persisted, so every app start uses the defaults.
+     */
+    var batchMatchExpanded by mutableStateOf(true)
+    var batchManualExpanded by mutableStateOf(false)
     /** Selection waiting for the user to confirm discarding unsaved edits. */
     var pendingSelection by mutableStateOf<Set<String>?>(null)
     var showSettings by mutableStateOf(false)
