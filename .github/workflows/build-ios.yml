@@ -1,0 +1,111 @@
+name: 🍎 构建 Lyrico Mod iOS（未签名 IPA）
+
+# iOS / iPadOS 版：XcodeGen 生成工程，xcodebuild 归档（不签名），打包为 Payload/LyricoMod.app 的 IPA。
+# 安装：TrollStore 直接安装，或 全能签 等工具自签。无需任何仓库 Secrets。
+on:
+  push:
+    branches: [ ios ]
+  workflow_dispatch:
+
+concurrency:
+  group: ios-ipa-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  core-test:
+    name: 🧪 TagLib 桥接核心测试（macOS 主机）
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 📥 TagLib 子模块
+        run: git submodule update --init --recursive lyrico-audiotag/src/main/cpp/taglib
+      - name: 🧪 构建并运行
+        run: ios/Tests/core/run-core-tests.sh
+
+  build:
+    name: 🏗️ 构建 IPA
+    runs-on: macos-latest
+    steps:
+      - name: 📥 检出代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 📥 TagLib 子模块
+        id: taglib
+        run: |
+          git submodule update --init --recursive lyrico-audiotag/src/main/cpp/taglib
+          echo "sha=$(git -C lyrico-audiotag/src/main/cpp/taglib rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: 🧰 环境信息 / 安装 XcodeGen
+        run: |
+          xcodebuild -version
+          brew install xcodegen || brew upgrade xcodegen || true
+          xcodegen --version
+
+      - name: 📦 缓存 TagLib（iOS 静态库）
+        id: cache-taglib
+        uses: actions/cache@v4
+        with:
+          path: ios/build/taglib
+          key: taglib-ios-v1-${{ steps.taglib.outputs.sha }}-${{ hashFiles('ios/scripts/build-taglib.sh') }}
+
+      - name: 🛠️ 编译 TagLib（iphoneos arm64）
+        if: steps.cache-taglib.outputs.cache-hit != 'true'
+        run: ios/scripts/build-taglib.sh iphoneos
+
+      - name: 🧩 生成 Xcode 工程
+        run: ios/scripts/generate-project.sh
+
+      - name: 🏗️ xcodebuild archive（不签名）
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild archive \
+            -project LyricoMod.xcodeproj \
+            -scheme LyricoMod \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/LyricoMod.xcarchive \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            2>&1 | tee build/xcodebuild.log | grep -E "error:|warning: .*(deprecated)?|\*\* ARCHIVE" | grep -v "^ld: warning" | head -400 || true
+          grep -q "ARCHIVE SUCCEEDED" build/xcodebuild.log || { echo "::group::errors"; grep -E "error:" build/xcodebuild.log | sort -u | head -200; echo "::endgroup::"; tail -80 build/xcodebuild.log; exit 1; }
+
+      - name: 📦 打包 IPA
+        id: ipa
+        working-directory: ios
+        run: |
+          set -euo pipefail
+          APP="build/LyricoMod.xcarchive/Products/Applications/LyricoMod.app"
+          test -d "$APP"
+          VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$APP/Info.plist")
+          SHA="${GITHUB_SHA::7}"
+          NAME="LyricoMod-${VERSION}-${SHA}.ipa"
+          rm -rf build/ipa && mkdir -p build/ipa/Payload
+          cp -R "$APP" build/ipa/Payload/
+          (cd build/ipa && zip -qry "../$NAME" Payload)
+          ls -la "build/$NAME"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "path=ios/build/$NAME" >> "$GITHUB_OUTPUT"
+
+      - name: 📤 上传 IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: LyricoMod-iOS
+          path: ${{ steps.ipa.outputs.path }}
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: 🚀 发布到 Release（预发布）
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="ios-${GITHUB_SHA::7}"
+          gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$tag" "${{ steps.ipa.outputs.path }}" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --prerelease --title "Lyrico Mod iOS $tag" --notes-file ios/IOS_PORT.md

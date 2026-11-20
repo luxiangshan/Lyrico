@@ -1,0 +1,7 @@
+build/
+DerivedData/
+*.xcodeproj/
+*.xcworkspace/
+*.ipa
+Payload/
+.project.gen.yml
