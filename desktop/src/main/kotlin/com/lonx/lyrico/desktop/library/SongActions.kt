@@ -1,5 +1,7 @@
 package com.lonx.lyrico.desktop.library
 
+import com.lonx.lyrico.desktop.lyrics.LrcConflict
+import com.lonx.lyrico.desktop.lyrics.LrcExportPlan
 import com.lonx.lyrico.desktop.lyrics.LrcFiles
 import com.lonx.lyrico.desktop.lyrics.LyricsTarget
 import com.lonx.lyrico.desktop.settings.AppSettings
@@ -19,7 +21,15 @@ class EditorData(
 
 class SaveResult(val song: Song, val messages: List<String>)
 
-enum class LrcExportOutcome { EXPORTED, NO_LYRICS, EXISTS_SKIPPED, FAILED }
+enum class LrcExportOutcome(val label: String) {
+    EXPORTED("已导出"),
+    OVERWRITTEN("覆盖已有"),
+    RENAMED("重名加序号"),
+    NO_LYRICS("无歌词"),
+    EXISTS_SKIPPED("已存在跳过"),
+}
+
+class LrcExportResult(val outcome: LrcExportOutcome, val song: Song, val where: String? = null)
 
 /** Blocking song operations shared by the UI; call off the UI thread. */
 class SongActions(private val settings: () -> AppSettings, private val storeFor: (Song) -> SongStore) {
@@ -81,15 +91,33 @@ class SongActions(private val settings: () -> AppSettings, private val storeFor:
         return store.refreshStat(song.withTag(TagService.read(file, false)), file)
     }
 
-    /** Exports the tag lyrics of [song] to its .lrc. */
-    fun exportLrc(song: Song, overwrite: Boolean): Pair<LrcExportOutcome, Song> {
+    /**
+     * Exports lyrics of [song] to a .lrc following [plan]: the tag lyrics, or [lyricsOverride] (the editor's text).
+     * With a plan directory the file is written there locally (also for remote songs); otherwise next to the song.
+     */
+    fun exportLrc(song: Song, plan: LrcExportPlan, lyricsOverride: String? = null): LrcExportResult {
         val store = storeFor(song)
-        if (song.hasLrc && !overwrite) return LrcExportOutcome.EXISTS_SKIPPED to song
-        val file = store.fileFor(song)
-        val lyrics = TagService.read(file, false).lyrics
-        if (lyrics.isBlank()) return LrcExportOutcome.NO_LYRICS to song
-        store.writeLrc(song, LrcFiles.normalize(lyrics), settings().lrcOptions)
-        return LrcExportOutcome.EXPORTED to song.copy(hasLrc = true)
+        if (plan.dir == null && plan.conflict == LrcConflict.SKIP && lyricsOverride == null && store.hasLrc(song)) {
+            return LrcExportResult(LrcExportOutcome.EXISTS_SKIPPED, song) // skip before downloading a remote song
+        }
+        val lyrics = lyricsOverride ?: TagService.read(store.fileFor(song), false).lyrics
+        if (lyrics.isBlank()) return LrcExportResult(LrcExportOutcome.NO_LYRICS, song)
+        val text = LrcFiles.normalize(lyrics)
+        val options = settings().lrcOptions
+        if (plan.dir == null) {
+            val exists = store.hasLrc(song)
+            if (exists && plan.conflict == LrcConflict.SKIP) return LrcExportResult(LrcExportOutcome.EXISTS_SKIPPED, song)
+            val where = store.writeLrc(song, text, options)
+            return LrcExportResult(if (exists) LrcExportOutcome.OVERWRITTEN else LrcExportOutcome.EXPORTED, song.copy(hasLrc = true), where)
+        }
+        val target = plan.resolve(song.baseName) ?: return LrcExportResult(LrcExportOutcome.EXISTS_SKIPPED, song)
+        LrcFiles.write(target.file, text, options)
+        val outcome = when (target.kind) {
+            LrcExportPlan.Kind.NEW -> LrcExportOutcome.EXPORTED
+            LrcExportPlan.Kind.OVERWRITE -> LrcExportOutcome.OVERWRITTEN
+            LrcExportPlan.Kind.RENAMED -> LrcExportOutcome.RENAMED
+        }
+        return LrcExportResult(outcome, song, target.file.absolutePath)
     }
 
     /** Writes the adjacent .lrc (or [lrcText] when given) into the tag. Returns null when no .lrc exists. */

@@ -25,7 +25,9 @@ import java.util.concurrent.ConcurrentHashMap
 enum class SearchKind(val label: String) { LYRICS("歌词"), COVER("封面"), METADATA("歌曲信息") }
 
 /** State of one search dialog. Results stream in per source. */
-class SearchSession(val kind: SearchKind, val editor: EditorState, initialKeyword: String) {
+class SearchSession(val kind: SearchKind, val editor: EditorState, initialKeyword: String, sourceIds: List<String>) {
+    /** Plugins ticked for this search (default: every enabled one). */
+    val selected = mutableStateListOf<String>().apply { addAll(sourceIds) }
     var keyword by mutableStateOf(initialKeyword)
     val lyrics = mutableStateListOf<LyricsCandidate>()
     val covers = mutableStateListOf<Pair<CoverCandidate, ImageBitmap?>>()
@@ -66,8 +68,7 @@ object MatchScore {
     }
 }
 
-class PluginHub(private val app: AppState) {
-    val repo = PluginRepository()
+class PluginHub(private val app: AppState, val repo: PluginRepository = PluginRepository()) {
     var plugins by mutableStateOf(repo.installed())
         private set
     var states by mutableStateOf(repo.states())
@@ -77,13 +78,16 @@ class PluginHub(private val app: AppState) {
     var catalog by mutableStateOf<List<CatalogRelease>?>(null)
     var configuring by mutableStateOf<InstalledPlugin?>(null)
     var confirmBatch by mutableStateOf<List<Song>?>(null)
+    /** Plugins ticked in the batch-match dialog (default: every enabled lyrics source). */
+    val batchSelected = mutableStateListOf<String>()
     private val sources = ConcurrentHashMap<String, PluginSource>()
 
     fun state(id: String) = states[id] ?: PluginState(order = plugins.indexOfFirst { it.id == id })
 
-    private fun enabled(kind: SearchKind): List<InstalledPlugin> = plugins.filter { p ->
+    /** Enabled plugins for [kind], in the user's order. Disabled plugins (master switch or per type) are left out. */
+    fun enabled(kind: SearchKind): List<InstalledPlugin> = plugins.filter { p ->
         val s = state(p.id)
-        when (kind) {
+        s.enabled && when (kind) {
             SearchKind.LYRICS -> PluginManifest.CAP_GET_LYRICS in p.caps && s.lyricsEnabled
             SearchKind.COVER -> PluginManifest.CAP_SEARCH_COVERS in p.caps && s.coverEnabled
             SearchKind.METADATA -> PluginManifest.CAP_SEARCH_SONGS in p.caps && s.metadataEnabled
@@ -132,10 +136,14 @@ class PluginHub(private val app: AppState) {
         }
     }
 
-    fun installZip(file: File) = launchBusy("安装插件") {
-        val ms = withContext(Dispatchers.IO) { repo.installZip(file.readBytes()) }
+    /** 导入插件 button: installs a local ZIP. */
+    fun installZip(file: File) = launchBusy("安装插件") { withContext(Dispatchers.IO) { installZipNow(file) } }
+
+    /** Blocking part of [installZip]; returns the message shown to the user. */
+    fun installZipNow(file: File): String {
+        val ms = repo.installZip(file.readBytes())
         reload()
-        "已安装：" + ms.joinToString("、") { m -> plugins.firstOrNull { it.id == m.id }?.displayName ?: m.id }
+        return "已安装：" + ms.joinToString("、") { m -> plugins.firstOrNull { it.id == m.id }?.displayName ?: m.id }
     }
 
     fun loadCatalog(url: String) = launchBusy("获取插件列表") {
@@ -171,13 +179,15 @@ class PluginHub(private val app: AppState) {
         return listOf(t, e.fields[TagField.ARTIST].orEmpty()).filter { it.isNotBlank() }.joinToString(" ")
     }
 
-    fun openLyricsSearch(e: EditorState) { session = SearchSession(SearchKind.LYRICS, e, keywordOf(e)).also { run(it) } }
+    private fun newSession(kind: SearchKind, e: EditorState, keyword: String) = SearchSession(kind, e, keyword, enabled(kind).map { it.id })
+
+    fun openLyricsSearch(e: EditorState) { session = newSession(SearchKind.LYRICS, e, keywordOf(e)).also { run(it) } }
     fun openCoverSearch(e: EditorState) {
         val kw = listOf(e.fields[TagField.ALBUM].orEmpty().ifBlank { e.fields[TagField.TITLE].orEmpty() }, e.fields[TagField.ARTIST].orEmpty())
             .filter { it.isNotBlank() }.joinToString(" ").ifBlank { e.song.baseName }
-        session = SearchSession(SearchKind.COVER, e, kw).also { run(it) }
+        session = newSession(SearchKind.COVER, e, kw).also { run(it) }
     }
-    fun openMetadataSearch(e: EditorState) { session = SearchSession(SearchKind.METADATA, e, keywordOf(e)).also { run(it) } }
+    fun openMetadataSearch(e: EditorState) { session = newSession(SearchKind.METADATA, e, keywordOf(e)).also { run(it) } }
 
     /** Lyrics for one song from one source: via its own song search when it has one, else direct. */
     private fun lyricsFrom(p: InstalledPlugin, title: String, artist: String, album: String, durationSec: Int, keyword: String, maxSongs: Int): List<LyricsCandidate> {
@@ -196,7 +206,8 @@ class PluginHub(private val app: AppState) {
     fun run(s: SearchSession) {
         s.job?.cancel()
         s.lyrics.clear(); s.covers.clear(); s.songs.clear(); s.errors.clear()
-        val list = enabled(s.kind)
+        val list = enabled(s.kind).filter { it.id in s.selected }
+        if (list.isEmpty()) { s.errors += "没有勾选可用的插件"; s.running = 0; return }
         s.running = list.size
         val e = s.editor
         s.job = app.scope.launch {
@@ -280,32 +291,40 @@ class PluginHub(private val app: AppState) {
         app.toast("已填入「${song.sourceName}」的歌曲信息，保存后生效")
     }
 
-    /** Batch: best-scoring lyrics from enabled sources (in order) saved with the default destination. */
-    fun batchMatchLyrics(songs: List<Song>) { confirmBatch = songs }
+    /** Batch: best-scoring lyrics from the ticked enabled sources (in order) saved with the default destination. */
+    fun batchMatchLyrics(songs: List<Song>) {
+        batchSelected.clear()
+        batchSelected.addAll(enabled(SearchKind.LYRICS).map { it.id })
+        confirmBatch = songs
+    }
 
-    fun runBatchMatch(songs: List<Song>) {
+    fun runBatchMatch(songs: List<Song>, sourceIds: Collection<String> = batchSelected.toList()) {
         confirmBatch = null
-        val list = enabled(SearchKind.LYRICS)
+        val list = enabled(SearchKind.LYRICS).filter { it.id in sourceIds }
+        if (list.isEmpty()) { app.toast("没有勾选可用的歌词插件"); return }
         val skip = app.settings.batchSkipExistingLyrics
         val target = app.settings.lyricsTarget
-        app.runBatch("插件匹配歌词", songs) { s ->
-            if (skip && (s.hasTagLyrics || (s.hasLrc && !target.writesTag))) return@runBatch "已有歌词跳过"
-            val title = s.title.ifBlank { s.baseName }
-            val keyword = listOf(title, s.artist).filter { it.isNotBlank() }.joinToString(" ")
-            var best: Pair<LyricsCandidate, Double>? = null
-            for (p in list) {
-                val cands = runCatching { lyricsFrom(p, title, s.artist, s.album, s.durationSeconds, keyword, 2) }.getOrDefault(emptyList())
-                val top = cands.filter { LrcFiles.isSynced(it.text) || it.text.isNotBlank() }
-                    .map { it to MatchScore.song(title, s.artist, s.durationSeconds, it.title, it.artist, it.durationMs) }
-                    .maxByOrNull { it.second }
-                if (top != null && (best == null || top.second > best.second)) best = top
-                if (best != null && best.second >= 0.85) break
-            }
-            val chosen = best?.takeIf { it.second >= 0.55 } ?: return@runBatch "未找到匹配"
-            val tagLyrics = if (s.hasTagLyrics) "\u0000" else ""
-            val r = app.actions.save(s, TagEdit(), chosen.first.text, tagLyrics, target)
-            app.scope.launch { app.updateSong(r.song) }
-            "已匹配"
+        app.runBatch("插件匹配歌词", songs) { s -> matchLyrics(s, list, skip, target) }
+    }
+
+    /** Blocking: finds and saves lyrics for one song using [list]; returns the outcome label. */
+    fun matchLyrics(s: Song, list: List<InstalledPlugin>, skip: Boolean, target: com.lonx.lyrico.desktop.lyrics.LyricsTarget): String {
+        if (skip && (s.hasTagLyrics || (s.hasLrc && !target.writesTag))) return "已有歌词跳过"
+        val title = s.title.ifBlank { s.baseName }
+        val keyword = listOf(title, s.artist).filter { it.isNotBlank() }.joinToString(" ")
+        var best: Pair<LyricsCandidate, Double>? = null
+        for (p in list) {
+            val cands = runCatching { lyricsFrom(p, title, s.artist, s.album, s.durationSeconds, keyword, 2) }.getOrDefault(emptyList())
+            val top = cands.filter { LrcFiles.isSynced(it.text) || it.text.isNotBlank() }
+                .map { it to MatchScore.song(title, s.artist, s.durationSeconds, it.title, it.artist, it.durationMs) }
+                .maxByOrNull { it.second }
+            if (top != null && (best == null || top.second > best.second)) best = top
+            if (best != null && best.second >= 0.85) break
         }
+        val chosen = best?.takeIf { it.second >= 0.55 } ?: return "未找到匹配"
+        val tagLyrics = if (s.hasTagLyrics) "\u0000" else ""
+        val r = app.actions.save(s, TagEdit(), chosen.first.text, tagLyrics, target)
+        app.scope.launch { app.updateSong(r.song) }
+        return "已匹配"
     }
 }

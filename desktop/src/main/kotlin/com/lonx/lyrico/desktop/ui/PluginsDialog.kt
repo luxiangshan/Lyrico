@@ -50,6 +50,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -135,7 +136,7 @@ fun PluginsDialog(state: AppState) {
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun PluginRow(state: AppState, p: InstalledPlugin) {
+internal fun PluginRow(state: AppState, p: InstalledPlugin) {
     val hub = state.plugins
     val st = hub.state(p.id)
     var confirmRemove by remember { mutableStateOf(false) }
@@ -147,15 +148,25 @@ private fun PluginRow(state: AppState, p: InstalledPlugin) {
             }
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
-                Text("${p.displayName}  ${p.manifest.versionName}", fontWeight = FontWeight.SemiBold)
+                Text("${p.displayName}  ${p.manifest.versionName}" + if (st.enabled) "" else "（已停用）", fontWeight = FontWeight.SemiBold,
+                    color = if (st.enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant)
                 Text(p.description.lines().firstOrNull().orEmpty(), style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    if (PluginManifest.CAP_SEARCH_SONGS in p.caps) FilterChip(st.metadataEnabled, { hub.updateState(p.id) { it.copy(metadataEnabled = !it.metadataEnabled) } }, label = { Text("歌曲信息") })
-                    if (PluginManifest.CAP_GET_LYRICS in p.caps) FilterChip(st.lyricsEnabled, { hub.updateState(p.id) { it.copy(lyricsEnabled = !it.lyricsEnabled) } }, label = { Text("歌词") })
-                    if (PluginManifest.CAP_SEARCH_COVERS in p.caps) FilterChip(st.coverEnabled, { hub.updateState(p.id) { it.copy(coverEnabled = !it.coverEnabled) } }, label = { Text("封面") })
+                    // Per-type switches only matter when the plugin offers more than one kind.
+                    val kinds = listOf(PluginManifest.CAP_SEARCH_SONGS, PluginManifest.CAP_GET_LYRICS, PluginManifest.CAP_SEARCH_COVERS).count { it in p.caps }
+                    if (kinds > 1) {
+                        if (PluginManifest.CAP_SEARCH_SONGS in p.caps) FilterChip(st.metadataEnabled, { hub.updateState(p.id) { it.copy(metadataEnabled = !it.metadataEnabled) } }, label = { Text("歌曲信息") }, enabled = st.enabled)
+                        if (PluginManifest.CAP_GET_LYRICS in p.caps) FilterChip(st.lyricsEnabled, { hub.updateState(p.id) { it.copy(lyricsEnabled = !it.lyricsEnabled) } }, label = { Text("歌词") }, enabled = st.enabled)
+                        if (PluginManifest.CAP_SEARCH_COVERS in p.caps) FilterChip(st.coverEnabled, { hub.updateState(p.id) { it.copy(coverEnabled = !it.coverEnabled) } }, label = { Text("封面") }, enabled = st.enabled)
+                    }
                 }
             }
             Column(horizontalAlignment = Alignment.End) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("启用", style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.width(4.dp))
+                    Switch(st.enabled, { v -> hub.updateState(p.id) { it.copy(enabled = v) } }, modifier = Modifier.testTag("plugin-enabled-${p.id}"))
+                }
                 Row {
                     TextButton(onClick = { hub.move(p.id, -1) }) { Text("上移") }
                     TextButton(onClick = { hub.move(p.id, 1) }) { Text("下移") }
@@ -237,6 +248,7 @@ fun PluginSearchDialog(state: AppState, s: SearchSession) {
                         OutlinedTextField(s.keyword, { s.keyword = it }, label = { Text("关键词") }, singleLine = true, modifier = Modifier.weight(1f))
                         Button(onClick = { hub.run(s) }) { Text("搜索") }
                     }
+                    SourcePicker(hub.enabled(s.kind), s.selected)
                     if (s.running > 0) { Spacer(Modifier.height(6.dp)); Text("正在搜索（剩余 ${s.running} 个来源）…", style = MaterialTheme.typography.bodySmall); LinearProgressIndicator(Modifier.fillMaxWidth()) }
                     hub.busy?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                     for (e in s.errors) Text(e, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
@@ -317,13 +329,30 @@ fun BatchMatchConfirm(state: AppState, songs: List<com.lonx.lyrico.desktop.libra
         text = {
             Column {
                 Text("按插件顺序搜索，选择标题/艺术家/时长最接近的结果，保存到：${state.settings.lyricsTarget.label}（可在设置中修改默认值）。")
+                Spacer(Modifier.height(6.dp))
+                SourcePicker(hub.enabled(SearchKind.LYRICS), hub.batchSelected)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(state.settings.batchSkipExistingLyrics, { v -> state.updateSettings { it.copy(batchSkipExistingLyrics = v) } })
                     Text("跳过已有歌词的歌曲")
                 }
             }
         },
-        confirmButton = { TextButton(onClick = { hub.runBatchMatch(songs) }) { Text("开始") } },
+        confirmButton = { TextButton(onClick = { hub.runBatchMatch(songs) }, enabled = hub.batchSelected.isNotEmpty()) { Text("开始") } },
         dismissButton = { TextButton(onClick = { hub.confirmBatch = null }) { Text("取消") } },
     )
+}
+
+/** "本次使用的插件" chips: tick which enabled plugins this run uses (default all). Disabled plugins are not listed. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun SourcePicker(sources: List<InstalledPlugin>, selected: MutableList<String>) {
+    Column {
+        Text(if (sources.isEmpty()) "没有启用的插件（在 插件管理 中启用）" else "本次使用的插件：", style = MaterialTheme.typography.bodySmall)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            for (p in sources) {
+                val on = p.id in selected
+                FilterChip(on, { if (on) selected.remove(p.id) else selected.add(p.id) }, label = { Text(p.displayName) }, modifier = Modifier.testTag("source-${p.id}"))
+            }
+        }
+    }
 }

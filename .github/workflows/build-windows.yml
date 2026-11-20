@@ -30,8 +30,28 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: Unit tests
+      - name: Unit + end-to-end + headless UI tests (Windows)
         run: ./gradlew.bat --no-daemon --console=plain test
+
+      - name: End-to-end report
+        if: always()
+        run: |
+          Get-ChildItem build/e2e-report -Filter *.txt -ErrorAction SilentlyContinue | ForEach-Object { "==== $($_.Name)"; Get-Content $_.FullName -Encoding UTF8 }
+          $xml = Get-ChildItem build/test-results/test -Filter *.xml -ErrorAction SilentlyContinue
+          $t = 0; $f = 0; $s = 0
+          foreach ($x in $xml) { [xml]$d = Get-Content $x.FullName -Encoding UTF8; $t += [int]$d.testsuite.tests; $f += [int]$d.testsuite.failures + [int]$d.testsuite.errors; $s += [int]$d.testsuite.skipped }
+          "TESTS total=$t failed=$f skipped=$s"
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-${{ github.sha }}
+          path: |
+            desktop/build/reports/tests/test
+            desktop/build/test-results/test
+            desktop/build/e2e-report
+          if-no-files-found: ignore
 
       - name: Package MSI and app image
         run: ./gradlew.bat --no-daemon --console=plain packageDistributionForCurrentOS createDistributable

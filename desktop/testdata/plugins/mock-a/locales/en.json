@@ -1,0 +1,1 @@
+{"plugin.name": "Mock source A", "plugin.description": "Test plugin that queries a mock HTTP server", "config.baseUrl": "Server URL"}

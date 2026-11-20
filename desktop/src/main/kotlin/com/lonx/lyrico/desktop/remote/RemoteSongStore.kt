@@ -91,6 +91,10 @@ class RemoteSongStore(
         return storage().openRead(entry.path).use { LrcFiles.decode(it.readBytes()) }
     }
 
+    override fun hasLrc(song: Song): Boolean = storage().list(parentOf(song.path)).any {
+        !it.isDirectory && it.name.endsWith(".lrc", true) && it.name.substringBeforeLast('.').equals(song.baseName, true)
+    }
+
     override fun writeLrc(song: Song, text: String, options: LrcWriteOptions): String {
         val dir = parentOf(song.path)
         val existing = try {

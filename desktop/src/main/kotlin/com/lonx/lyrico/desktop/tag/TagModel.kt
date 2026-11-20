@@ -16,7 +16,7 @@ enum class TagField(val label: String) {
     GENRE("流派"),
     COMPOSER("作曲"),
     LYRICIST("作词"),
-    COMMENT("备注"),
+    COMMENT("注释"),
 }
 
 class CoverArt(val bytes: ByteArray, val mime: String) {

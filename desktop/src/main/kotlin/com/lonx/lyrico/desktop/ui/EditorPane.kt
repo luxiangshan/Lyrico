@@ -39,6 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -139,7 +140,7 @@ private fun Editor(state: AppState, e: EditorState) {
                     }
                 }) { Text("导入 LRC…") }
                 TextButton(onClick = { state.loadAdjacentLrcIntoEditor() }) { Text("载入同名 LRC") }
-                TextButton(onClick = { state.exportEditorLrc() }, enabled = e.lyrics.isNotBlank()) { Text("导出为同名 LRC") }
+                TextButton(onClick = { state.exportEditorLrc() }, enabled = e.lyrics.isNotBlank()) { Text("导出 LRC…") }
                 TextButton(onClick = {
                     val dir = if (song.isRemote) null else File(song.path).parentFile
                     Dialogs.saveFile("LRC 另存为", LrcFiles.lrcNameFor(song.fileName), dir)?.let { f ->
@@ -153,7 +154,7 @@ private fun Editor(state: AppState, e: EditorState) {
             OutlinedTextField(
                 value = e.lyrics,
                 onValueChange = { e.lyrics = it },
-                modifier = Modifier.fillMaxWidth().heightIn(min = 320.dp, max = 640.dp),
+                modifier = Modifier.fillMaxWidth().heightIn(min = 320.dp, max = 640.dp).testTag("editor-lyrics"),
                 textStyle = TextStyle(fontFamily = FontFamily.Monospace, fontSize = 13.sp),
                 placeholder = { Text("[00:12.34]歌词内容……") },
             )
@@ -170,6 +171,7 @@ private fun Editor(state: AppState, e: EditorState) {
                                 selected = e.target == t,
                                 onClick = { e.target = t },
                                 shape = SegmentedButtonDefaults.itemShape(i, LyricsTarget.entries.size),
+                                modifier = Modifier.testTag("target-${t.name}"),
                             ) { Text(t.label, maxLines = 1) }
                         }
                     }
@@ -184,7 +186,7 @@ private fun Editor(state: AppState, e: EditorState) {
                     )
                     TextButton(onClick = { state.revertEditor() }, enabled = e.dirty && !e.saving) { Text("还原") }
                     if (state.plugins.hasMetadataSources) TextButton(onClick = { state.plugins.openMetadataSearch(e) }) { Text("搜索信息") }
-                    Button(onClick = { state.saveEditor(e.target) }, enabled = !e.saving) {
+                    Button(onClick = { state.saveEditor(e.target) }, enabled = !e.saving, modifier = Modifier.testTag("editor-save")) {
                         if (e.saving) { CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp); Spacer(Modifier.width(8.dp)) }
                         Text(if (song.isRemote) "保存并上传" else "保存")
                     }
@@ -216,7 +218,7 @@ private fun FieldGrid(e: EditorState) {
                         label = { Text(f.label + if (changed) " *" else "") },
                         singleLine = f != TagField.COMMENT,
                         maxLines = if (f == TagField.COMMENT) 4 else 1,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.weight(1f).testTag("editor-field-${f.name}"),
                     )
                 }
             }

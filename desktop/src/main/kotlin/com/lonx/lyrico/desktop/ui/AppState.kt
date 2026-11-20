@@ -7,16 +7,19 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.lonx.lyrico.desktop.library.BatchEdit
+import com.lonx.lyrico.desktop.library.BatchField
 import com.lonx.lyrico.desktop.library.EditorData
 import com.lonx.lyrico.desktop.library.LibraryCache
 import com.lonx.lyrico.desktop.library.LibraryScanner
 import com.lonx.lyrico.desktop.library.LocalSongStore
-import com.lonx.lyrico.desktop.library.LrcExportOutcome
 import com.lonx.lyrico.desktop.library.Song
 import com.lonx.lyrico.desktop.library.SongActions
 import com.lonx.lyrico.desktop.library.SongSorting
 import com.lonx.lyrico.desktop.library.SongStore
 import com.lonx.lyrico.desktop.library.SortKey
+import com.lonx.lyrico.desktop.lyrics.LrcConflict
+import com.lonx.lyrico.desktop.lyrics.LrcExportPlan
 import com.lonx.lyrico.desktop.lyrics.LrcFiles
 import com.lonx.lyrico.desktop.lyrics.LyricsTarget
 import com.lonx.lyrico.desktop.remote.RemoteHub
@@ -52,31 +55,80 @@ class EditorState(val data: EditorData, defaultTarget: LyricsTarget) {
     fun buildEdit() = TagEdit(fields = changedFields, cover = coverChange)
 }
 
-class BatchState(songs: List<Song>) {
-    val enabled = mutableStateMapOf<TagField, Boolean>()
-    val values = mutableStateMapOf<TagField, String>()
-    val mixed = HashSet<TagField>()
-    var coverChange: CoverChange by mutableStateOf(CoverChange.Keep)
+/** Batch editor: every field has an "apply" checkbox; only checked fields are written. */
+class BatchState(val songs: List<Song>) {
+    val checked = mutableStateMapOf<BatchField, Boolean>()
+    val values = mutableStateMapOf<BatchField, String>()
+    /** true = the songs have different values (or not all could be read): placeholder 〈多个值〉. */
+    val mixed = mutableStateMapOf<BatchField, Boolean>()
+    private val touched = HashSet<BatchField>()
+    /** Image chosen for the cover; null with COVER checked = remove covers. */
+    var cover by mutableStateOf<CoverArt?>(null)
+    var coverFileName by mutableStateOf<String?>(null)
+    /** Songs that currently have a cover (from the library index). */
+    val withCover: Int = songs.count { it.hasCover }
+    var tagsLoaded by mutableStateOf(false)
+    /** Fields that would be cleared, waiting for confirmation. */
+    var confirmClear by mutableStateOf<List<BatchField>?>(null)
 
     init {
-        fun common(f: (Song) -> String): String? = songs.map(f).distinct().singleOrNull()
-        val known = mapOf<TagField, (Song) -> String>(
-            TagField.ARTIST to { it.artist }, TagField.ALBUM to { it.album }, TagField.ALBUM_ARTIST to { it.albumArtist },
-            TagField.YEAR to { it.year }, TagField.GENRE to { it.genre }, TagField.DISC to { it.disc },
-        )
-        for (f in TagField.entries) {
-            val getter = known[f]
-            val c = if (getter != null) common(getter) else null
-            if (getter != null && c == null) mixed += f
-            values[f] = c.orEmpty()
-            enabled[f] = false
+        val index = BatchEdit.fromIndex(songs)
+        for (f in BatchField.entries) {
+            checked[f] = false
+            if (!f.isText) continue
+            values[f] = index[f].orEmpty()
+            mixed[f] = f !in index || index[f] == null
         }
     }
 
-    fun buildEdit() = TagEdit(fields = TagField.entries.filter { enabled[it] == true }.associateWith { values[it].orEmpty() }, cover = coverChange)
+    /** Fills shared values read from the tags, leaving fields the user already edited alone. */
+    fun applyShared(shared: Map<BatchField, String?>) {
+        for ((f, v) in shared) {
+            if (f in touched) continue
+            values[f] = v.orEmpty()
+            mixed[f] = v == null
+        }
+        tagsLoaded = true
+    }
+
+    fun setValue(f: BatchField, v: String) {
+        values[f] = v
+        touched += f
+        checked[f] = true
+    }
+
+    fun setCoverImage(art: CoverArt, name: String?) {
+        cover = art; coverFileName = name; checked[BatchField.COVER] = true
+    }
+
+    fun setRemoveCover() {
+        cover = null; coverFileName = null; checked[BatchField.COVER] = true
+    }
+
+    val checkedSet: Set<BatchField> get() = BatchField.entries.filter { checked[it] == true }.toSet()
+    val allChecked: Boolean get() = BatchField.entries.all { checked[it] == true }
+
+    /** 全选 / 全不选. */
+    fun toggleAll() {
+        val v = !allChecked
+        BatchField.entries.forEach { checked[it] = v }
+    }
+
+    fun buildEdit(): TagEdit = BatchEdit.build(checkedSet, values.toMap(), cover)
+    fun cleared(): List<BatchField> = BatchEdit.cleared(checkedSet, values.toMap(), cover)
 }
 
-class AppState(val scope: CoroutineScope) {
+class BatchSummary(val title: String, val counts: Map<String, Int>, val failures: List<String>)
+
+/** State of the LRC export dialog (one song from the editor, or the batch selection). */
+class LrcExportPrompt(val songs: List<Song>, val lyricsOverride: String?, initialDir: File?, conflict: LrcConflict, rememberDir: Boolean) {
+    var dir by mutableStateOf(initialDir)
+    var conflict by mutableStateOf(conflict)
+    var rememberDir by mutableStateOf(rememberDir)
+    val single get() = lyricsOverride != null || songs.size == 1
+}
+
+class AppState(val scope: CoroutineScope, pluginDir: File? = null) {
     var settings by mutableStateOf(SettingsStore.load())
         private set
     var songs by mutableStateOf(LibraryCache.load())
@@ -102,7 +154,12 @@ class AppState(val scope: CoroutineScope) {
     var confirmExit by mutableStateOf(false)
     val snackbar = SnackbarHostState()
     val remote = RemoteHub(this)
-    val plugins = com.lonx.lyrico.desktop.plugin.PluginHub(this)
+    val plugins = com.lonx.lyrico.desktop.plugin.PluginHub(this, pluginDir?.let { com.lonx.lyrico.desktop.plugin.PluginRepository(it) } ?: com.lonx.lyrico.desktop.plugin.PluginRepository())
+    var lrcExport by mutableStateOf<LrcExportPrompt?>(null)
+
+    /** File choosers (replaced by tests; the real ones are Swing dialogs). */
+    var chooseDirectory: (title: String, start: File?) -> File? = { t, d -> Dialogs.chooseFolder(t, d) }
+    var chooseImage: () -> File? = { Dialogs.openFile("选择封面图片", "图片 (jpg/png/webp)", Dialogs.imageExtensions) }
 
     val sortKey: SortKey get() = runCatching { SortKey.valueOf(settings.sortKey) }.getOrDefault(SortKey.TITLE)
 
@@ -159,13 +216,17 @@ class AppState(val scope: CoroutineScope) {
             scanStatus = "正在扫描…"
             val cached = songs.filter { !it.isRemote }.associateBy { it.id }
             val remoteSongs = songs.filter { it.isRemote }
+            // Progress updates are posted asynchronously; never let a late one overwrite the final state.
+            val finished = java.util.concurrent.atomic.AtomicBoolean(false)
             try {
                 val result = LibraryScanner.scan(settings.folders, cached, settings.scanThreads) { done, total, partial ->
                     scope.launch {
+                        if (finished.get()) return@launch
                         scanStatus = "正在扫描 $done / $total"
                         if (done < total) songs = remoteSongs + partial
                     }
                 }
+                finished.set(true)
                 songs = remoteSongs + result
                 persistSongsSoon()
                 val errors = result.count { it.error != null }
@@ -173,8 +234,10 @@ class AppState(val scope: CoroutineScope) {
                 toast("扫描完成：${result.size} 首" + if (errors > 0) "，$errors 个文件无法读取" else "")
                 editor?.let { e -> if (songs.none { it.id == e.song.id }) { editor = null } }
             } catch (e: kotlinx.coroutines.CancellationException) {
+                finished.set(true)
                 throw e
             } catch (e: Exception) {
+                finished.set(true)
                 scanStatus = null
                 toast("扫描失败：${e.message}", long = true)
             }
@@ -220,7 +283,25 @@ class AppState(val scope: CoroutineScope) {
         } else {
             editor = null
             editorError = null
-            if (ids.size > 1) batch = BatchState(songs.filter { it.id in ids })
+            if (ids.size > 1) openBatch(ids)
+        }
+    }
+
+    private var batchLoadJob: Job? = null
+    private fun openBatch(ids: Set<String>) {
+        val b = BatchState(songs.filter { it.id in ids })
+        batch = b
+        batchLoadJob?.cancel()
+        batchLoadJob = scope.launch {
+            val tags = withContext(Dispatchers.IO) {
+                b.songs.map { s ->
+                    runCatching {
+                        val f = if (s.isRemote) (storeFor(s) as? com.lonx.lyrico.desktop.remote.RemoteSongStore)?.cachedIfFresh(s) else File(s.path)
+                        f?.let { com.lonx.lyrico.desktop.tag.TagService.read(it, false) }
+                    }.getOrNull()
+                }
+            }
+            if (batch === b) b.applyShared(BatchEdit.shared(tags))
         }
     }
 
@@ -300,19 +381,11 @@ class AppState(val scope: CoroutineScope) {
         e.coverChange = if (e.data.tag.cover != null) CoverChange.Remove else CoverChange.Keep
     }
 
-    /** Writes the editor's current lyrics to the .lrc only. */
+    /** Opens the LRC export dialog for the editor's current lyrics. */
     fun exportEditorLrc() {
         val e = editor ?: return
         if (e.lyrics.isBlank()) { toast("歌词为空"); return }
-        scope.launch {
-            try {
-                val where = withContext(Dispatchers.IO) { storeFor(e.song).writeLrc(e.song, LrcFiles.normalize(e.lyrics), settings.lrcOptions) }
-                updateSong(e.song.copy(hasLrc = true))
-                toast("已导出 LRC：$where")
-            } catch (ex: Exception) {
-                toast("导出失败：${ex.message}", long = true)
-            }
-        }
+        openLrcExport(listOf(e.song), e.lyrics)
     }
 
     fun loadAdjacentLrcIntoEditor() {
@@ -324,6 +397,9 @@ class AppState(val scope: CoroutineScope) {
     }
 
     // ---------------------------------------------------------------- batch actions
+
+    /** Result of the last finished batch run (shown as a toast; read by tests). */
+    var lastBatch by mutableStateOf<BatchSummary?>(null)
 
     fun runBatch(title: String, list: List<Song>, op: (Song) -> String?) {
         if (list.isEmpty()) return
@@ -339,39 +415,71 @@ class AppState(val scope: CoroutineScope) {
                     failures += "${s.fileName}：${e.message ?: e.javaClass.simpleName}"
                 }
             }
+            lastBatch = BatchSummary(title, counts.toMap(), failures.toList())
             busy = null
             val summary = counts.entries.joinToString("，") { "${it.key} ${it.value} 首" }
             val fail = if (failures.isEmpty()) "" else "；失败 ${failures.size} 首（${failures.take(3).joinToString("；")}${if (failures.size > 3) "…" else ""}）"
             toast("$title 完成：$summary$fail", long = failures.isNotEmpty())
             val sel = selection
-            if (sel.size > 1) batch = BatchState(songs.filter { it.id in sel })
+            if (sel.size > 1) openBatch(sel)
         }
     }
 
-    fun applyBatch() {
+    /** Writes the checked batch fields; asks first when some of them would be cleared. */
+    fun applyBatch(confirmed: Boolean = false) {
         val b = batch ?: return
         val edit = b.buildEdit()
         if (edit.isEmpty) { toast("请先勾选要修改的字段"); return }
-        runBatch("批量修改", selectedSongs) { s ->
+        if (!confirmed && b.cleared().isNotEmpty()) { b.confirmClear = b.cleared(); return }
+        b.confirmClear = null
+        val coverTouched = edit.cover != CoverChange.Keep
+        runBatch("批量修改", b.songs.mapNotNull { s -> songs.firstOrNull { it.id == s.id } }) { s ->
             val updated = actions.applyEdit(s, edit)
-            Thumbnails.invalidate(s)
+            if (coverTouched) Thumbnails.invalidate(s)
             scope.launch { updateSong(updated) }
             "已修改"
         }
     }
 
-    fun batchExportLrc(list: List<Song> = selectedSongs) {
-        runBatch("导出 LRC", list) { s ->
-            val (outcome, updated) = actions.exportLrc(s, settings.batchExportOverwrite)
-            if (updated != s) scope.launch { updateSong(updated) }
-            when (outcome) {
-                LrcExportOutcome.EXPORTED -> "已导出"
-                LrcExportOutcome.NO_LYRICS -> "无歌词"
-                LrcExportOutcome.EXISTS_SKIPPED -> "已存在跳过"
-                LrcExportOutcome.FAILED -> "失败"
-            }
+    fun chooseBatchCover() {
+        val b = batch ?: return
+        val f = chooseImage() ?: return
+        try {
+            val art = CoverArt.fromFile(f)
+            if (ImageUtils.decode(art.bytes) == null) { toast("无法识别该图片（支持 jpg/png/webp）"); return }
+            b.setCoverImage(art, f.name)
+        } catch (ex: Exception) {
+            toast("读取图片失败：${ex.message}")
         }
     }
+
+    fun openLrcExport(list: List<Song> = selectedSongs, lyricsOverride: String? = null) {
+        if (list.isEmpty()) return
+        val s = settings
+        val dir = if (s.rememberLrcExportDir) s.lrcExportDir?.let { File(it) }?.takeIf { it.isDirectory } else null
+        lrcExport = LrcExportPrompt(list, lyricsOverride, dir, s.lrcExportConflict, s.rememberLrcExportDir)
+    }
+
+    fun chooseLrcExportDir(p: LrcExportPrompt) {
+        val start = p.dir ?: settings.lrcExportDir?.let { File(it) }?.takeIf { it.isDirectory }
+        chooseDirectory("选择 LRC 导出目录", start)?.let { p.dir = it }
+    }
+
+    fun runLrcExport(p: LrcExportPrompt) {
+        lrcExport = null
+        val dir = p.dir
+        updateSettings { it.copy(lrcExportConflict = p.conflict, rememberLrcExportDir = p.rememberDir, lrcExportDir = dir?.absolutePath ?: it.lrcExportDir) }
+        if (dir != null && !dir.isDirectory && !dir.mkdirs()) { toast("无法创建导出目录：${dir.absolutePath}", long = true); return }
+        val plan = LrcExportPlan(dir, p.conflict)
+        val where = dir?.absolutePath ?: "歌曲所在文件夹"
+        runBatch("导出 LRC 到 $where", p.songs) { s ->
+            val r = actions.exportLrc(s, plan, p.lyricsOverride)
+            if (r.song != s) scope.launch { updateSong(r.song) }
+            r.outcome.label
+        }
+    }
+
+    fun batchExportLrc(list: List<Song> = selectedSongs) = openLrcExport(list)
 
     fun batchImportLrc(list: List<Song> = selectedSongs) {
         runBatch("LRC 写入标签", list) { s ->

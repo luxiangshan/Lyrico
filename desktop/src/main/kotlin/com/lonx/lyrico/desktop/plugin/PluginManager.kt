@@ -20,6 +20,8 @@ import java.util.zip.ZipInputStream
 
 @Serializable
 data class PluginState(
+    /** Master switch: a disabled plugin is never called (search, batch matching). */
+    val enabled: Boolean = true,
     val metadataEnabled: Boolean = true,
     val lyricsEnabled: Boolean = true,
     val coverEnabled: Boolean = true,
@@ -163,10 +165,39 @@ class PluginRepository(private val root: File = AppDirs.plugins) {
     }
 
     fun fetchCatalog(url: String): PluginCatalog {
-        val text = String(download(url), Charsets.UTF_8)
-        val c = pluginJson.decodeFromString(PluginCatalog.serializer(), text)
-        val base = url.toHttpUrl()
+        var resolved = url
+        val bytes = try {
+            download(url)
+        } catch (e: IOException) {
+            // ".../releases/latest/download/catalog.json" 404s when the newest release carrying the catalog is a
+            // prerelease (GitHub's "latest" skips prereleases). Fall back to the newest release that has the file.
+            resolved = githubReleaseAssetFallback(url) ?: throw e
+            download(resolved)
+        }
+        val c = pluginJson.decodeFromString(PluginCatalog.serializer(), String(bytes, Charsets.UTF_8))
+        val base = resolved.toHttpUrl()
         return c.copy(plugins = c.plugins.map { it.copy(downloadUrl = base.resolve(it.downloadUrl)?.toString() ?: it.downloadUrl) })
+    }
+
+    private val latestAsset = Regex("""^https://github\.com/([^/]+)/([^/]+)/releases/latest/download/([^/?#]+)$""")
+
+    /** URL of [url]'s asset in the newest release (prereleases included) that has it, via the GitHub API. */
+    fun githubReleaseAssetFallback(url: String): String? {
+        val m = latestAsset.find(url.trim()) ?: return null
+        val (owner, repo, asset) = m.destructured
+        val api = "https://api.github.com/repos/$owner/$repo/releases?per_page=15"
+        val json = runCatching { String(download(api), Charsets.UTF_8) }.getOrNull() ?: return null
+        val arr = runCatching { pluginJson.parseToJsonElement(json) as kotlinx.serialization.json.JsonArray }.getOrNull() ?: return null
+        for (rel in arr) {
+            val o = rel as? JsonObject ?: continue
+            if ((o["draft"] as? JsonPrimitive)?.content == "true") continue
+            val assets = o["assets"] as? kotlinx.serialization.json.JsonArray ?: continue
+            for (a in assets) {
+                val ao = a as? JsonObject ?: continue
+                if ((ao["name"] as? JsonPrimitive)?.content == asset) return (ao["browser_download_url"] as? JsonPrimitive)?.content
+            }
+        }
+        return null
     }
 
     fun installRelease(r: CatalogRelease): List<PluginManifest> {

@@ -51,6 +51,31 @@ object SelfTest {
                 res
             }
         }
+        check("webp-cover-and-lrc-export") {
+            // Batch-edit path on the bundled runtime: WebP cover (no ImageIO support) into WAV + AIFF, then LRC export
+            // into a chosen directory with a same-name collision.
+            val fmt = AudioFormat(8000f, 16, 1, true, false)
+            val files = listOf(AudioFileFormat.Type.WAVE to "wav", AudioFileFormat.Type.AIFF to "aiff").mapIndexed { i, (type, ext) ->
+                val sub = File(dir, "f$i").apply { mkdirs() }
+                File(sub, "晴天.$ext").also { AudioSystem.write(AudioInputStream(ByteArrayInputStream(ByteArray(8000)), fmt, 4000), type, it) }
+            }
+            // 1x1 lossless WebP
+            val webp = java.util.Base64.getDecoder().decode("UklGRhoAAABXRUJQVlA4TA0AAAAvAAAAEAcQERGIiP4HAA==")
+            val edit = com.lonx.lyrico.desktop.library.BatchEdit.build(
+                setOf(com.lonx.lyrico.desktop.library.BatchField.COVER, com.lonx.lyrico.desktop.library.BatchField.LYRICS),
+                mapOf(com.lonx.lyrico.desktop.library.BatchField.LYRICS to "[00:01.00]批量"), com.lonx.lyrico.desktop.tag.CoverArt(webp, "image/webp"))
+            files.forEach { TagService.write(it, edit) }
+            files.forEach { f ->
+                val t = TagService.read(f, withCover = true)
+                require(t.cover?.bytes?.contentEquals(webp) == true && t.lyrics == "[00:01.00]批量") { "${f.name}: cover=${t.cover?.mime} lyrics=${t.lyrics}" }
+            }
+            val out = File(dir, "导出").apply { mkdirs() }
+            val plan = com.lonx.lyrico.desktop.lyrics.LrcExportPlan(out, com.lonx.lyrico.desktop.lyrics.LrcConflict.NUMBER)
+            files.forEach { f -> LrcFiles.write(plan.resolve(f.nameWithoutExtension)!!.file, TagService.read(f).lyrics, LrcWriteOptions()) }
+            val names = out.list()!!.sorted()
+            require(names == listOf("晴天 (2).lrc", "晴天.lrc")) { names.toString() }
+            "wav+aiff webp cover ok, export $names"
+        }
         check("tls-modules") { javax.net.ssl.SSLContext.getDefault().protocol }
         dir.deleteRecursively()
         out.appendLine(if (ok) "SELFTEST OK" else "SELFTEST FAILED")

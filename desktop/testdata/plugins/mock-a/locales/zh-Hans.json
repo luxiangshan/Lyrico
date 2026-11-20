@@ -1,0 +1,1 @@
+{"plugin.name": "模拟歌词源A", "plugin.description": "测试用插件：从模拟 HTTP 服务器获取歌词", "config.baseUrl": "服务器地址"}

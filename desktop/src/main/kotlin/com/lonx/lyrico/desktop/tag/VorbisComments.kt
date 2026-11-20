@@ -59,7 +59,8 @@ class VorbisComments(var vendor: String = "Lyrico Mod", val entries: MutableList
             val mime = art.mime.toByteArray(Charsets.US_ASCII)
             int(3); int(mime.size); out.write(mime)
             int(0) // description
-            int(0); int(0); int(0); int(0) // width, height, depth, colors (unknown)
+            val size = ImageSize.of(art.bytes)
+            int(size?.first ?: 0); int(size?.second ?: 0); int(if (size != null) 24 else 0); int(0) // width, height, depth, colors
             int(art.bytes.size); out.write(art.bytes)
             return Base64.getEncoder().encodeToString(out.toByteArray())
         }

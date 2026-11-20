@@ -6,6 +6,8 @@ import com.lonx.lyrico.desktop.library.LrcExportOutcome
 import com.lonx.lyrico.desktop.library.SongActions
 import com.lonx.lyrico.desktop.library.SongSorting
 import com.lonx.lyrico.desktop.library.SortKey
+import com.lonx.lyrico.desktop.lyrics.LrcConflict
+import com.lonx.lyrico.desktop.lyrics.LrcExportPlan
 import com.lonx.lyrico.desktop.lyrics.LrcFiles
 import com.lonx.lyrico.desktop.lyrics.LyricsTarget
 import com.lonx.lyrico.desktop.settings.AppSettings
@@ -92,12 +94,13 @@ class SongActionsTest {
         val songs = scan()
         val sa = songs.first { it.fileName == "a.mp3" }
         val sb = songs.first { it.fileName == "b.m4a" }
-        assertEquals(LrcExportOutcome.EXPORTED, actions.exportLrc(sa, true).first)
-        assertEquals(LrcExportOutcome.NO_LYRICS, actions.exportLrc(sb, true).first)
+        val overwrite = LrcExportPlan(null, LrcConflict.OVERWRITE)
+        assertEquals(LrcExportOutcome.EXPORTED, actions.exportLrc(sa, overwrite).outcome)
+        assertEquals(LrcExportOutcome.NO_LYRICS, actions.exportLrc(sb, overwrite).outcome)
         assertEquals(lrc, LrcFiles.read(File(tmp.root, "a.lrc")))
         val rescanned = scan().first { it.fileName == "a.mp3" }
         assertTrue(rescanned.hasLrc)
-        assertEquals(LrcExportOutcome.EXISTS_SKIPPED, actions.exportLrc(rescanned, false).first)
+        assertEquals(LrcExportOutcome.EXISTS_SKIPPED, actions.exportLrc(rescanned, LrcExportPlan(null, LrcConflict.SKIP)).outcome)
 
         assertNull(actions.importLrcToTag(sb))
         File(tmp.root, "b.lrc").writeText("[00:09.00]导入")

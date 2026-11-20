@@ -22,8 +22,8 @@ object Dialogs {
         isAcceptAllFileFilterUsed = true
     }
 
-    fun chooseFolder(title: String = "选择文件夹"): File? {
-        val c = chooser(title, null)
+    fun chooseFolder(title: String = "选择文件夹", dir: File? = null): File? {
+        val c = chooser(title, dir)
         c.fileSelectionMode = JFileChooser.DIRECTORIES_ONLY
         return if (c.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) c.selectedFile?.also { lastDir = it.parentFile } else null
     }

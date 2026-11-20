@@ -79,7 +79,8 @@ fun SettingsDialog(state: AppState) {
                         Section("LRC 文件")
                         Toggle("UTF-8 带 BOM", "部分老旧播放器/车机需要 BOM 才能正确识别中文", s.lrcBom) { v -> state.updateSettings { it.copy(lrcBom = v) } }
                         Choice("换行符", LineEnding.entries.map { it to it.label }, s.lrcLineEnding) { v -> state.updateSettings { it.copy(lrcLineEnding = v) } }
-                        Toggle("批量导出时覆盖已有 LRC", null, s.batchExportOverwrite) { v -> state.updateSettings { it.copy(batchExportOverwrite = v) } }
+                        Choice("导出 LRC 时已存在同名文件", com.lonx.lyrico.desktop.lyrics.LrcConflict.entries.map { it to it.label }, s.lrcExportConflict) { v -> state.updateSettings { it.copy(lrcExportConflict = v) } }
+                        Toggle("记住 LRC 导出目录", "开启后导出对话框默认选中上次的目录；关闭则默认导出到歌曲所在文件夹", s.rememberLrcExportDir) { v -> state.updateSettings { it.copy(rememberLrcExportDir = v) } }
 
                         Section("MP3 / WAV / AIFF（ID3）")
                         Choice("ID3 版本", listOf("2.3" to "ID3v2.3（UTF-16，Windows 资源管理器兼容性最好）", "2.4" to "ID3v2.4（UTF-8）"), s.id3Version) { v -> state.updateSettings { it.copy(id3Version = v) } }

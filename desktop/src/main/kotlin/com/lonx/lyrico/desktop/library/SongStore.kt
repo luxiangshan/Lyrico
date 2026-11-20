@@ -18,6 +18,9 @@ interface SongStore {
     /** Text of the .lrc next to the song, or null. */
     fun readLrc(song: Song): String?
 
+    /** True when a .lrc with the song's name (any case) exists next to it. */
+    fun hasLrc(song: Song): Boolean
+
     /** Writes the .lrc next to the song. Returns where it went (for messages). */
     fun writeLrc(song: Song, text: String, options: LrcWriteOptions): String
 
@@ -31,6 +34,8 @@ object LocalSongStore : SongStore {
     override fun commit(song: Song, file: File) = Unit
 
     override fun readLrc(song: Song): String? = LrcFiles.findAdjacent(File(song.path))?.let { LrcFiles.read(it) }
+
+    override fun hasLrc(song: Song): Boolean = LrcFiles.findAdjacent(File(song.path)) != null
 
     override fun writeLrc(song: Song, text: String, options: LrcWriteOptions): String {
         val audio = File(song.path)

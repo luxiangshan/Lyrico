@@ -1,6 +1,7 @@
 package com.lonx.lyrico.desktop.settings
 
 import com.lonx.lyrico.desktop.lyrics.LineEnding
+import com.lonx.lyrico.desktop.lyrics.LrcConflict
 import com.lonx.lyrico.desktop.lyrics.LrcWriteOptions
 import com.lonx.lyrico.desktop.lyrics.LyricsTarget
 import com.lonx.lyrico.desktop.tag.TagWriteOptions
@@ -17,7 +18,12 @@ data class AppSettings(
     val usltLanguage: String = "chi",
     val id3Version: String = "2.3",
     val autoLoadAdjacentLrc: Boolean = true,
-    val batchExportOverwrite: Boolean = true,
+    /** Overwrite / skip / add a number when the exported .lrc already exists. */
+    val lrcExportConflict: LrcConflict = LrcConflict.OVERWRITE,
+    /** Last directory chosen in the LRC export dialog. */
+    val lrcExportDir: String? = null,
+    /** Pre-select [lrcExportDir] next time (otherwise every export starts with "song folder"). */
+    val rememberLrcExportDir: Boolean = false,
     val sortKey: String = "TITLE",
     val sortDescending: Boolean = false,
     val darkTheme: Boolean = false,
@@ -33,14 +39,15 @@ data class AppSettings(
 
 /** %APPDATA%\LyricoMod on Windows, ~/.lyrico-mod elsewhere. */
 object AppDirs {
-    val root: File by lazy {
+    /** Re-read on each access so tests can point every AppState at its own folder via -Dlyrico.home. */
+    val root: File get() {
         val override = System.getProperty("lyrico.home")
         val dir = when {
             override != null -> File(override)
             System.getenv("APPDATA") != null -> File(System.getenv("APPDATA"), "LyricoMod")
             else -> File(System.getProperty("user.home"), ".lyrico-mod")
         }
-        dir.mkdirs(); dir
+        dir.mkdirs(); return dir
     }
     val cache: File get() = File(root, "cache").apply { mkdirs() }
     val thumbs: File get() = File(cache, "thumbs").apply { mkdirs() }

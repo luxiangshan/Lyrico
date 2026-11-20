@@ -35,6 +35,8 @@ dependencies {
     implementation("net.sf.kxml:kxml2:2.3.0")
 
     testImplementation(kotlin("test"))
+    @OptIn(org.jetbrains.compose.ExperimentalComposeLibrary::class)
+    testImplementation(compose.uiTest)
     testImplementation("junit:junit:4.13.2")
     testImplementation("com.squareup.okhttp3:mockwebserver3:5.5.1")
 }
@@ -42,6 +44,17 @@ dependencies {
 tasks.test {
     useJUnit()
     systemProperty("file.encoding", "UTF-8")
+    // App data of tests (settings, library cache, plugins) stays inside build/.
+    val home = layout.buildDirectory.dir("test-home").get().asFile
+    val report = layout.buildDirectory.dir("e2e-report").get().asFile
+    systemProperty("lyrico.home", home.absolutePath)
+    systemProperty("lyrico.e2eReport", report.absolutePath)
+    doFirst { home.deleteRecursively(); report.deleteRecursively() }
+    testLogging {
+        events("passed", "skipped", "failed")
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+        showStandardStreams = false
+    }
 }
 
 compose.desktop {

@@ -125,9 +125,20 @@ object JaudiotaggerBackend : TagBackend {
                     art.mimeType = c.art.mime
                     art.pictureType = PictureTypes.DEFAULT_ID
                     art.description = ""
-                    try { art.setImageFromData() } catch (_: Throwable) { /* size unknown (e.g. webp) */ }
+                    // jaudiotagger sizes images with ImageIO, which cannot read WebP; use our own header parser.
+                    val size = ImageSize.of(c.art.bytes)
+                    if (size != null) { art.width = size.first; art.height = size.second }
+                    else try { art.setImageFromData() } catch (_: Throwable) { }
                     try {
-                        tag.setField(art)
+                        if (tag is FlacTag) {
+                            // FlacTag.createField(Artwork) calls setImageFromData() unconditionally (NPE for WebP).
+                            tag.setField(tag.createArtworkField(c.art.bytes, PictureTypes.DEFAULT_ID, c.art.mime, "", art.width, art.height, 24, 0))
+                        } else if (tag is VorbisCommentTag) {
+                            // VorbisCommentTag.createField(Artwork) has the same ImageIO dependency.
+                            tag.setField(tag.createField(org.jaudiotagger.tag.vorbiscomment.VorbisCommentFieldKey.METADATA_BLOCK_PICTURE, VorbisComments.encodePicture(c.art)))
+                        } else {
+                            tag.setField(art)
+                        }
                     } catch (e: Exception) {
                         throw TagException("封面无法写入：${e.message ?: e.javaClass.simpleName}", e)
                     }
